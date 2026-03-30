@@ -1,14 +1,5 @@
-# Node modules
 node_modules/
 .next/
 build/
 .env.local
-.env.*.local
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-
-# OS
 .DS_Store
