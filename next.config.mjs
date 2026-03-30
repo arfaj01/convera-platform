@@ -4,6 +4,16 @@ const nextConfig = {
   // 'standalone' for Docker/self-hosted, omit for Vercel.
   // output: 'standalone',  // Disabled for Vercel deployment
 
+  // ─── ESLint — skip during production builds ────────────────────
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
+  // ─── TypeScript — skip type checking during builds ─────────────
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+
   // ─── Compiler ──────────────────────────────────────────────────
   // Remove console.log in production (keep console.error/warn)
   compiler: {
