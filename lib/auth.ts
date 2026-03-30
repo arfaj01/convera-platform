@@ -41,4 +41,39 @@ export async function signOut() {
   if (error) throw error;
 }
 
-/zw
+/**
+ * Send a password-reset email via Supabase.
+ * redirectTo must match an entry in Supabase → Auth → Redirect URLs.
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+  const supabase = createBrowserSupabase();
+  const redirectTo =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/reset-password`
+      : undefined;
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    email.trim().toLowerCase(),
+    { redirectTo },
+  );
+  if (error) throw error;
+}
+
+/**
+ * Exchange the ?code= URL parameter (PKCE recovery flow) for a live session.
+ * Call this on /reset-password page load.
+ */
+export async function exchangeResetCode(code: string): Promise<void> {
+  const supabase = createBrowserSupabase();
+  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  if (error) throw error;
+}
+
+/**
+ * Update the currently-authenticated user's password.
+ * Requires a valid session (obtained via exchangeResetCode).
+ */
+export async function updatePassword(newPassword: string): Promise<void> {
+  const supabase = createBrowserSupabase();
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}

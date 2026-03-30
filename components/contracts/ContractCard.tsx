@@ -71,6 +71,5 @@ export default function ContractCard({ contract, onClick }: ContractCardProps) {
         </div>
       </div>
     </div>
-  
-  }
+  );
 }

@@ -1,17 +1,23 @@
-import { NextResquest } from 'next/server';
-import { getAuthHeaders } from 'A/lib/supabase';
+/**
+ * POST /api/notifications/read-all — Mark all notifications as read for current user
+ */
 
-export async function POST(req: NextRequest) {
-  try {
-    const headers = getAuthHeaders();
-    const res = await fetch('${process.env.NEQ�_PUBLIC_SUPABASE_URL}/rest/v1/rpc/call/mark/notifications', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ schema: 'public' }),
-    });
-    if (!res.ok) return Response.json({ ok: false }, { status: 400 });
-    return Response.json({ ok: true });
-  } catch (err) {
-    return Response.json({ ok: false, err: '' + err }, { status: 500 });
+import { NextRequest } from 'next/server';
+import { withAuth, apiOk, apiError } from '@/lib/api-guard';
+
+export const POST = withAuth(async (_req: NextRequest, ctx) => {
+  const { admin, user } = ctx;
+
+  const { error } = await admin
+    .from('notifications')
+    .update({ is_read: true })
+    .eq('user_id', user.id)
+    .eq('is_read', false);
+
+  if (error) {
+    console.error('[POST /api/notifications/read-all]', error);
+    return apiError('فشل تحديث الإشعارات', 500);
   }
-}
+
+  return apiOk({ marked_read: true });
+});

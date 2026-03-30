@@ -1,5 +1,5 @@
-export const routeConfig = { revalidate: 0 };
+import { redirect } from 'next/navigation';
 
-export default function () {
-  return (loading);
+export default function Home() {
+  redirect('/dashboard');
 }

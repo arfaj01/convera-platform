@@ -10,7 +10,7 @@
  * All generated columns are read directly from DB (never recomputed client-side).
  */
 
-import { createBrowserSupabase } from 'A/lib/supabase';
+import { createBrowserSupabase } from '@/lib/supabase';
 
 // ─── Shared helpers ────────────────────────────────────────────────
 
@@ -101,10 +101,10 @@ export interface ChangeOrderRow {
   scopeType: string;      // mapped from scope_type
   status: string;
   description: string;
-  valueAdded: number;
-  valueDeducted: number;
-  netValueChange: number;
-  durationChange: number;
+  valueAdded: number;     // value_added
+  valueDeducted: number;  // value_deducted
+  netValueChange: number; // net_value_change
+  durationChange: number; // duration_change (months)
   cumulativeImpact: number;
   cumulativePct: number;
   createdAt: string;
@@ -150,10 +150,10 @@ export interface DocumentReportRow {
   contractNo: string;
   contractTitle: string;
   status: string;
-  hasInvoice: boolean;
-  hasClaimDoc: boolean;
-  hasApprovalDoc: boolean;
-  hasOtherDoc: boolean;
+  hasInvoice: boolean;      // type = 'invoice'
+  hasClaimDoc: boolean;     // type = 'claim' (technical report / supporting)
+  hasApprovalDoc: boolean;  // type = 'approval' (completion cert / audit form)
+  hasOtherDoc: boolean;     // type = 'other'
   totalDocuments: number;
   completionStatus: 'complete' | 'partial' | 'missing';
   submittedAt: string | null;
@@ -311,7 +311,282 @@ export async function fetchContractsReport(): Promise<{
     suspended: suspended.length,
     totalPortfolioValue: rows.reduce((s, r) => s + r.totalValue, 0),
     totalSpent: rows.reduce((s, r) => s + r.approvedClaimsValue, 0),
-    totalRemaining: rows.reduce((s, r) => s * r.remainingValue, 0),
+    totalRemaining: rows.reduce((s, r) => s + r.remainingValue, 0),
+  };
+
+  return { rows, kpi };
+}
+
+// ─── 3. Change Orders Report ────────────────────────────────────────
+
+export async function fetchChangeOrdersReport(): Promise<{
+  rows: ChangeOrderRow[];
+  kpi: ChangeOrdersKPI;
+}> {
+  const sb = createBrowserSupabase();
+
+  // Fetch change orders joined with contract info
+  // Actual columns: co_no, scope_type, value_added, value_deducted, net_value_change, duration_change
+  type QResult = Promise<{ data: Record<string, unknown>[] | null; error: unknown }>;
+  const qCO = sb.from('change_orders').select(`
+    id, co_no, contract_id, scope_type, status, description,
+    value_added, value_deducted, net_value_change, duration_change,
+    created_at, approved_at, submitted_by,
+    contracts(contract_no, title, title_ar, base_value)
+  `).order('created_at', { ascending: false });
+  const { data, error } = await withTimeout(qCO as unknown as QResult);
+  if (error) throw error;
+
+  // Fetch all approved change orders to compute cumulative per contract
+  const qApproved = sb.from('change_orders').select('contract_id, net_value_change').eq('status', 'approved');
+  const { data: allApproved } = await withTimeout(qApproved as unknown as QResult);
+
+  // Build cumulative map per contract (sum of net_value_change for approved orders)
+  const cumulMap: Record<string, number> = {};
+  for (const ao of (allApproved || [])) {
+    const cid = String(ao.contract_id);
+    cumulMap[cid] = (cumulMap[cid] ?? 0) + n(ao.net_value_change);
+  }
+
+  const rows: ChangeOrderRow[] = (data || []).map((o) => {
+    const ct = o.contracts as Record<string, unknown> | null;
+    const baseValue = n(ct?.base_value);
+    const contractId = String(o.contract_id);
+    const cumul = cumulMap[contractId] ?? 0;
+    const cumulPct = baseValue > 0 ? (cumul / baseValue) * 100 : 0;
+
+    return {
+      id: String(o.id),
+      orderNo: String(o.co_no ?? ''),
+      contractId,
+      contractNo: String(ct?.contract_no ?? ''),
+      contractTitle: String(ct?.title_ar ?? ct?.title ?? ''),
+      contractBaseValue: baseValue,
+      scopeType: String(o.scope_type ?? ''),
+      status: String(o.status ?? ''),
+      description: String(o.description ?? ''),
+      valueAdded: n(o.value_added),
+      valueDeducted: n(o.value_deducted),
+      netValueChange: n(o.net_value_change),
+      durationChange: Number(o.duration_change ?? 0),
+      cumulativeImpact: cumul,
+      cumulativePct: cumulPct,
+      createdAt: String(o.created_at ?? ''),
+      approvedAt: o.approved_at ? String(o.approved_at) : null,
+      submittedBy: String(o.submitted_by ?? ''),
+    };
+  });
+
+  const approved = rows.filter(r => r.status === 'approved');
+  const pending = rows.filter(r =>
+    ['submitted', 'under_supervisor_review', 'under_auditor_review',
+     'under_reviewer_check', 'pending_director_approval'].includes(r.status)
+  );
+  const rejected = rows.filter(r => r.status === 'rejected');
+
+  // Contracts approaching 10% limit (>= 8% utilization)
+  const approachingLimit = Object.values(
+    rows.reduce((acc, r) => {
+      if (!acc[r.contractId]) acc[r.contractId] = r;
+      return acc;
+    }, {} as Record<string, ChangeOrderRow>)
+  ).filter(r => r.cumulativePct >= 8).length;
+
+  const kpi: ChangeOrdersKPI = {
+    total: rows.length,
+    approved: approved.length,
+    pending: pending.length,
+    rejected: rejected.length,
+    totalValueApproved: approved.reduce((s, r) => s + r.netValueChange, 0),
+    avgCumulativePct: rows.length > 0
+      ? rows.reduce((s, r) => s + r.cumulativePct, 0) / rows.length
+      : 0,
+    contractsApproachingLimit: approachingLimit,
+  };
+
+  return { rows, kpi };
+}
+
+// ─── 4. Delay & Time Report ─────────────────────────────────────────
+
+export async function fetchDelayReport(): Promise<{
+  rows: DelayRow[];
+  kpi: DelayKPI;
+}> {
+  const sb = createBrowserSupabase();
+  const now = Date.now();
+
+  // Fetch non-terminal claims
+  type QResult = Promise<{ data: Record<string, unknown>[] | null; error: unknown }>;
+  const qClaims = sb.from('claims').select(`
+    id, claim_no, contract_id, status, submitted_at,
+    contracts(contract_no, title, title_ar)
+  `).not('status', 'in', '("draft","approved","rejected")').order('submitted_at', { ascending: true });
+  const { data: claims, error: ce } = await withTimeout(qClaims as unknown as QResult);
+  if (ce) throw ce;
+
+  // Fetch latest workflow action per claim (most recent transition)
+  const claimIds = (claims || []).map(c => String(c.id));
+  let workflowMap: Record<string, { created_at: string; actor_name: string }> = {};
+
+  if (claimIds.length > 0) {
+    const qWF = sb.from('claim_workflow').select(`
+      claim_id, created_at,
+      profiles:actor_id(full_name_ar, full_name)
+    `).in('claim_id', claimIds).order('created_at', { ascending: false });
+    const { data: wf } = await withTimeout(qWF as unknown as QResult);
+    // Keep only the latest per claim
+    for (const w of (wf || [])) {
+      const cid = String(w.claim_id);
+      if (!workflowMap[cid]) {
+        const p = w.profiles as Record<string, unknown> | null;
+        workflowMap[cid] = {
+          created_at: String(w.created_at ?? ''),
+          actor_name: String(p?.full_name_ar ?? p?.full_name ?? '—'),
+        };
+      }
+    }
+  }
+
+  // Stage display labels
+  const stageLabels: Record<string, string> = {
+    submitted: 'مُرسَلة — بانتظار جهة الإشراف',
+    under_supervisor_review: 'مراجعة جهة الإشراف',
+    returned_by_supervisor: 'مُرجَّعة من جهة الإشراف',
+    under_auditor_review: 'مراجعة المدقق',
+    returned_by_auditor: 'مُرجَّعة من المدقق',
+    under_reviewer_check: 'فحص المراجع',
+    pending_director_approval: 'بانتظار اعتماد المدير',
+  };
+
+  const rows: DelayRow[] = (claims || []).map((c) => {
+    const ct = c.contracts as Record<string, unknown> | null;
+    const lastAction = workflowMap[String(c.id)];
+    const sinceTs = lastAction?.created_at
+      ? new Date(lastAction.created_at).getTime()
+      : c.submitted_at
+        ? new Date(String(c.submitted_at)).getTime()
+        : now;
+    const daysInStage = Math.floor((now - sinceTs) / (1000 * 60 * 60 * 24));
+
+    // SLA: supervisor stage breaches at 3 days, warning at 2
+    const isSupervisorStage = String(c.status) === 'under_supervisor_review';
+    let slaStatus: DelayRow['slaStatus'] = 'ok';
+    if (isSupervisorStage) {
+      if (daysInStage >= 3) slaStatus = 'breached';
+      else if (daysInStage >= 2) slaStatus = 'warning';
+    } else if (daysInStage >= 7) {
+      slaStatus = 'warning';
+    } else if (daysInStage >= 14) {
+      slaStatus = 'breached';
+    }
+
+    return {
+      id: String(c.id),
+      claimNo: Number(c.claim_no),
+      contractNo: String(ct?.contract_no ?? ''),
+      contractTitle: String(ct?.title_ar ?? ct?.title ?? ''),
+      status: String(c.status ?? ''),
+      currentStage: stageLabels[String(c.status ?? '')] ?? String(c.status ?? ''),
+      daysInStage,
+      slaStatus,
+      lastActionAt: lastAction?.created_at ?? null,
+      lastActorName: lastAction?.actor_name ?? '—',
+      submittedAt: c.submitted_at ? String(c.submitted_at) : null,
+    };
+  });
+
+  const slaBreached = rows.filter(r => r.slaStatus === 'breached');
+  const slaWarning = rows.filter(r => r.slaStatus === 'warning');
+
+  const kpi: DelayKPI = {
+    totalPending: rows.length,
+    slaBreached: slaBreached.length,
+    slaWarning: slaWarning.length,
+    avgDaysInStage: rows.length > 0
+      ? Math.round(rows.reduce((s, r) => s + r.daysInStage, 0) / rows.length)
+      : 0,
+    oldestClaimDays: rows.length > 0 ? Math.max(...rows.map(r => r.daysInStage)) : 0,
+  };
+
+  return { rows, kpi };
+}
+
+// ─── 5. Documents Report ────────────────────────────────────────────
+
+export async function fetchDocumentsReport(): Promise<{
+  rows: DocumentReportRow[];
+  kpi: DocumentsKPI;
+}> {
+  const sb = createBrowserSupabase();
+
+  // Fetch all non-draft claims
+  type QResult = Promise<{ data: Record<string, unknown>[] | null; error: unknown }>;
+  const qClaims = sb.from('claims').select(`
+    id, claim_no, contract_id, status, submitted_at,
+    contracts(contract_no, title, title_ar)
+  `).neq('status', 'draft').order('claim_no', { ascending: false });
+  const { data: claims, error: ce } = await withTimeout(qClaims as unknown as QResult);
+  if (ce) throw ce;
+
+  // Fetch all documents for those claims
+  const claimIds = (claims || []).map(c => String(c.id));
+  let docMap: Record<string, Record<string, number>> = {};
+
+  if (claimIds.length > 0) {
+    // Actual schema: claim_id (not entity_id), type (not document_type), no entity_type column
+    const qDocs = sb.from('documents').select('claim_id, type').in('claim_id', claimIds);
+    const { data: docs } = await withTimeout(qDocs as unknown as QResult);
+    for (const d of (docs || [])) {
+      const eid = String(d.claim_id);
+      const dtype = String(d.type);
+      if (!docMap[eid]) docMap[eid] = {};
+      docMap[eid][dtype] = (docMap[eid][dtype] ?? 0) + 1;
+    }
+  }
+
+  const rows: DocumentReportRow[] = (claims || []).map((c) => {
+    const ct = c.contracts as Record<string, unknown> | null;
+    const cid = String(c.id);
+    const docs = docMap[cid] ?? {};
+    // Actual type values in DB (from documents.ts service):
+    //   'invoice'  = invoice PDF (mandatory)
+    //   'claim'    = claim supporting document / technical report (mandatory)
+    //   'approval' = approval/completion cert/audit form (auto-generated after approval)
+    //   'other'    = miscellaneous attachments
+    const hasInvoice = (docs.invoice ?? 0) > 0;
+    const hasClaimDoc = (docs.claim ?? 0) > 0;
+    const hasApprovalDoc = (docs.approval ?? 0) > 0;
+    const hasOtherDoc = (docs.other ?? 0) > 0;
+    const totalDocs = Object.values(docs).reduce((a, b) => a + b, 0);
+
+    // Mandatory pre-submission docs: invoice + claim document (Rule G1)
+    let completionStatus: DocumentReportRow['completionStatus'] = 'missing';
+    if (hasInvoice && hasClaimDoc) completionStatus = 'complete';
+    else if (hasInvoice || hasClaimDoc) completionStatus = 'partial';
+
+    return {
+      id: cid,
+      claimNo: Number(c.claim_no),
+      contractNo: String(ct?.contract_no ?? ''),
+      contractTitle: String(ct?.title_ar ?? ct?.title ?? ''),
+      status: String(c.status ?? ''),
+      hasInvoice,
+      hasClaimDoc,
+      hasApprovalDoc,
+      hasOtherDoc,
+      totalDocuments: totalDocs,
+      completionStatus,
+      submittedAt: c.submitted_at ? String(c.submitted_at) : null,
+    };
+  });
+
+  const kpi: DocumentsKPI = {
+    totalClaims: rows.length,
+    fullyDocumented: rows.filter(r => r.completionStatus === 'complete').length,
+    partiallyDocumented: rows.filter(r => r.completionStatus === 'partial').length,
+    missingDocuments: rows.filter(r => r.completionStatus === 'missing').length,
+    totalDocumentCount: rows.reduce((s, r) => s + r.totalDocuments, 0),
   };
 
   return { rows, kpi };

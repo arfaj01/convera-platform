@@ -13,7 +13,7 @@
 
 import { NextRequest } from 'next/server';
 import { withAuth, apiOk, apiError } from '@/lib/api-guard';
-import { loadActionCenter } from 'A/lib/action-center-service';
+import { loadActionCenter } from '@/lib/action-center-service';
 
 export const GET = withAuth(
   async (_req: NextRequest, ctx) => {

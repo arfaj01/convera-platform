@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from 'A/components/AuthProvider';
+import { useAuth } from '@/components/AuthProvider';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
-import Card, { CardBody } from 'A/components/ui/Card';
+import Card, { CardBody } from '@/components/ui/Card';
 import { fetchClaims } from '@/services/claims';
 import { fetchContracts } from '@/services/contracts';
 import { fmt, fmtDate } from '@/lib/formatters';
@@ -131,7 +131,7 @@ export default function ClaimsPage() {
       {/* Filter bar */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         {[
-          { value: 'all', label: 'الكل& },
+          { value: 'all', label: 'الكل' },
           { value: 'draft', label: 'مسودة' },
           { value: 'submitted', label: 'مقدّم' },
           { value: 'pending', label: 'قيد المراجعة' },
@@ -208,4 +208,5 @@ export default function ClaimsPage() {
         </CardBody>
       </Card>
     </>
-  
+  );
+}

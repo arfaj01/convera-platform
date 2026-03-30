@@ -14,7 +14,7 @@
 
 import type { ContractRiskScore, ClaimRiskScore, RiskLevel } from './risk-engine';
 
-/* ─── Types ────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────
 
 export type RecommendationPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 export type RecommendationCategory =
@@ -106,7 +106,7 @@ export function generateContractRecommendations(
     recs.push(make(
       'ceiling_exceeded', 'CRITICAL', 'financial',
       `تجاوز سقف العقد — الاستخدام ${ctx.utilizationPct.toFixed(0)}٪`,
-      'أوقف قبول المطالبات المالي مع الفريق القانوني',
+      'أوقف قبول المطالبات الجديدة وراجع الموقف المالي مع الفريق القانوني',
     ));
   }
   // Rule C2: Approaching ceiling (≥90%)
@@ -236,7 +236,7 @@ export function generateClaimRecommendations(
   // Rule R4: Low risk but delayed — approve quickly
   if (ctx.score.level === 'LOW' && slaPct >= 60) {
     recs.push(make(
-      "low_risk_delayed", 'MEDIUM', 'workflow',
+      'low_risk_delayed', 'MEDIUM', 'workflow',
       `مطالبة #${ctx.claimNo} — منخفضة المخاطر لكنها متأخرة`,
       'اعتمدها بسرعة — خطر منخفض ومتأخرة عن الجدول دون مبرر',
     ));
@@ -256,7 +256,7 @@ const PRIORITY_ORDER: Record<RecommendationPriority, number> = {
 
 export function sortRecommendations(recs: Recommendation[]): Recommendation[] {
   return [...recs].sort((a, b) => {
-    const pd = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[".priority];
+    const pd = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
     if (pd !== 0) return pd;
     return b.riskScore - a.riskScore;
   });

@@ -20,8 +20,8 @@ export async function createServerSupabase() {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
             );
-          } catch 
-        ;           // setAll can throw in Server Components — safe to ignore
+          } catch {
+            // setAll can throw in Server Components — safe to ignore
           }
         },
       },
@@ -43,4 +43,51 @@ function createServerSupabaseFromBearerToken(accessToken: string) {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {*       default rezelct {structure, ptty=true} focuse puts
+    {
+      global: {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      },
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  );
+}
+
+/**
+ * Smart server Supabase factory for API Route handlers.
+ *
+ * Priority:
+ *   1. Authorization: Bearer <token>  (used when browser fetch() is called)
+ *   2. Cookie-based session           (used for SSR Server Components)
+ *
+ * Always call supabase.auth.getUser() after this — it validates the token
+ * and returns null/error if the session is expired or invalid.
+ */
+export async function createServerSupabaseFromRequest(request: NextRequest) {
+  const authHeader = request.headers.get('Authorization');
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+  if (bearerToken) {
+    return createServerSupabaseFromBearerToken(bearerToken);
+  }
+
+  // Fall back to cookie-based auth (SSR pages, same-origin server requests)
+  return createServerSupabase();
+}
+
+// ─── Admin Client (Service Role — server-side only) ─────────────
+export function createAdminSupabase() {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is not set');
+  }
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serviceKey,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+}

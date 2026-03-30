@@ -14,7 +14,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { withAuth, apiOk, apiError } from 'A/lib/api-guard';
+import { withAuth, apiOk, apiError } from '@/lib/api-guard';
 
 export const GET = withAuth(
   async (_req: NextRequest, ctx) => {

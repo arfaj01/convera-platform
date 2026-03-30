@@ -40,7 +40,7 @@ export default function SettingsPage() {
 
       <div className="max-w-2xl">
         <Card>
-          <CardHeader title="المـف الشخصي" />
+          <CardHeader title="الملف الشخصي" />
           <CardBody>
             <div className="flex items-center gap-4 mb-6 pb-6 border-b border-gray-100">
               <div

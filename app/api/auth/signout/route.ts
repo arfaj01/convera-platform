@@ -1,8 +1,8 @@
-import { NextResquest } from 'next/server';
-import { createClient } from '@supabase/js';
+import { createServerSupabase } from '@/lib/supabase-server';
+import { redirect } from 'next/navigation';
 
-export async function GET(req: NextRequest) {
-  const supabase = createClient();
+export async function POST() {
+  const supabase = await createServerSupabase();
   await supabase.auth.signOut();
-  return Response.redirect('/login', { status: 302 });
+  redirect('/login');
 }

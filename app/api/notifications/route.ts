@@ -20,18 +20,27 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(50);
+
   if (error) {
     console.error('[GET /api/notifications]', error);
-    return apiError('فن تحميل الإشعارات', 500);
+    return apiError('فشل تحميل الإشعارات', 500);
   }
+
   const unreadCount = (data ?? []).filter(n => !n.is_read).length;
+
   return apiOk({ notifications: data ?? [], unread_count: unreadCount });
 });
-  export const POST = withAuth(async (req: NextRequest, ctx) => {
+
+// ─── POST /api/notifications (internal — for workflow events) ─────
+
+export const POST = withAuth(
+  async (req: NextRequest, ctx) => {
     const body = await req.json();
+
     if (!body.user_id || !body.title || !body.type) {
-      return apiError('النوشي المقول المطلوبة: user_id, title, type');
+      return apiError('الحقول المطلوبة: user_id, title, type');
     }
+
     const { data, error } = await ctx.admin
       .from('notifications')
       .insert({
@@ -46,11 +55,13 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
       })
       .select('id')
       .single();
+
     if (error) {
       console.error('[POST /api/notifications]', error);
-      return apiError('فشل إعيفار الإشعار', 500);
+      return apiError('فشل إنشاء الإشعار', 500);
     }
+
     return apiCreated({ id: data.id });
   },
-  { roles: ['director', 'admin', 'consultant'] },
+  { roles: ['director', 'admin', 'reviewer'] },
 );

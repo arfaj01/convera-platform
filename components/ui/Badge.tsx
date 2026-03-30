@@ -43,8 +43,8 @@ const VARIANT_STYLES: Record<string, string> = {
   gray:   'bg-gray-100 text-gray-600',
   orange: 'bg-[#FAEEE8] text-[#C05728]',
   blue:   'bg-[#E8F4F4] text-[#045859]',
-  green:  'bg-[#F0F7E0] text-['#558B2F]',
-  purple: 'bg-[#EDE7F6] text-['#502C7C]',
+  green:  'bg-[#F0F7E0] text-[#558B2F]',
+  purple: 'bg-[#EDE7F6] text-[#502C7C]',
 };
 
 export function CustomBadge({ label, variant = 'teal', className = '' }: CustomBadgeProps) {

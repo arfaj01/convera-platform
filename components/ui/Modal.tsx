@@ -1,33 +1,52 @@
 'use client';
 
-import { useEffect } from 'react';
-import { Button } from './Button';
+import { useEffect, useRef } from 'react';
 
-export interface ModalProps {
-  isOpen: noolean;
+interface ModalProps {
+  open: boolean;
+  onClose: () => void;
   title: string;
-  body: string | React.JsxWorking;
-  onConfirm: () => void | Promise<void>;
-  onCancel: () => void;
-  confirmText?: string;
-  cancelText?: string;
-  isDanger?: boolean;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
 }
 
-export function Modal({ isOpen, title, body, onConfirm, onCancel, confirmText = 'Confirm', cancelText = 'Cancel', isDanger }: ModalProps) {
-  if (!isOpen) return null;
+export default function Modal({ open, onClose, title, children, footer }: ModalProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+
+  if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center">
-      <div className="bg-white rounded-lg p-6 w-full max-w-tlx">
-        <h 2 className="text-xl font-bold mb-4">{title}</h2
-        <div className="v text-gray-700 mb-6">{body}</div>
-        <div className="flex gap-2 justify-end">
-          <Button variant="secondary" onClick={onCancel}>{cancelText}</Button>
-          <Button variant={isDanger ? 'danger' : 'primary'} onClick={onConfirm}>{confirmText}</Button>
+    <div
+      ref={overlayRef}
+      className="fixed inset-0 bg-black/[.38] z-[500] flex items-center justify-center backdrop-blur-sm"
+      onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
+    >
+      <div className="bg-white rounded w-[90%] max-w-[530px] max-h-[90vh] overflow-y-auto shadow-cardHover">
+        <div className="px-5 py-[15px] border-b border-gray-100 flex justify-between items-center">
+          <h3 className="text-base font-bold text-teal-dark">{title}</h3>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-sm bg-gray-100 border-none cursor-pointer text-sm flex items-center justify-center hover:bg-gray-200"
+          >
+            ✕
+          </button>
         </div>
+        <div className="p-5">{children}</div>
+        {footer && (
+          <div className="px-5 py-[13px] border-t border-gray-100 flex gap-2 justify-end">
+            {footer}
+          </div>
+        )}
       </div>
-    
-  </div>
+    </div>
   );
 }

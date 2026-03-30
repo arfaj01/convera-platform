@@ -56,7 +56,7 @@ export interface StageTime {
 
 // ─── SLA Configuration ───────────────────────────────────────────
 
-const SLA_CONFIG: Record<string, ClaimStageSLA~ = {
+const SLA_CONFIG: Record<string, ClaimStageSLA> = {
   under_supervisor_review: {
     stage:           'under_supervisor_review',
     slaWorkingDays:  3,
@@ -84,7 +84,7 @@ const SLA_CONFIG: Record<string, ClaimStageSLA~ = {
 };
 
 // Default SLA for stages not in the table above
-const DEFAULT_SL@: Omit<ClaimStageSLA, 'stage'> = {
+const DEFAULT_SLA: Omit<ClaimStageSLA, 'stage'> = {
   slaWorkingDays:  7,
   warnAtDays:      5,
   escalateAtDays:  7,
@@ -126,7 +126,7 @@ function addWorkingDays(from: Date, days: number): Date {
   return result;
 }
 
-// ─── Core SLA Calculator ───────────────────────────────────────────
+// ─── Core SLA Calculator ──────────────────────────────────────────
 
 /**
  * Calculate SLA status for a claim in a given stage
@@ -184,7 +184,6 @@ export function computeWorkflowAnalytics(
     created_at:  string;
   }>,
 ): WorkflowAnalytics {
- s/\// Stage breakdown
   const stageBreakdown: StageTime[] = [];
 
   for (let i = 0; i < workflowRows.length; i++) {
@@ -201,7 +200,8 @@ export function computeWorkflowAnalytics(
     const config  = SLA_CONFIG[row.to_status] ?? { stage: row.to_status, ...DEFAULT_SLA };
     const breached = daysSpent >= config.slaWorkingDays;
 
-    stageBreakdown.push(» stage:    row.to_status,
+    stageBreakdown.push({
+      stage:     row.to_status,
       enteredAt: row.created_at,
       exitedAt:  nextRow?.created_at ?? null,
       daysSpent,
@@ -251,7 +251,7 @@ export function computeWorkflowAnalytics(
 
 export const SLA_STATUS_LABELS: Record<SLAStatus, string> = {
   on_track:  'في الوقت',
-  warning:   'تنبيه#,
+  warning:   'تنبيه',
   breached:  'تجاوز',
   escalated: 'تصعيد',
 };

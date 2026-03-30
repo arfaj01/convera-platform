@@ -17,7 +17,7 @@ import {
   getNeedingAttention,
   type EnrichedClaim,
   type StageDistribution,
-} from 'A/lib/claim-intelligence';
+} from '@/lib/claim-intelligence';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -35,7 +35,7 @@ export interface IntelligenceKPIs {
 }
 
 export interface IntelligenceData {
-  kpis:            IntelligenceKPIs;
+  kpis:             IntelligenceKPIs;
   enrichedClaims:   EnrichedClaim[];
   stageDistribution: StageDistribution[];
   mostDelayed:      EnrichedClaim[];
@@ -43,9 +43,9 @@ export interface IntelligenceData {
   loadedAt:         string;
 }
 
-// ─── Active (in-progress) statuses ─────────────────────────────────
+// ─── Active (in-progress) statuses ────────────────────────────────
 
-/const ACTIVE_STATUSES: ClaimStatus[] = [
+const ACTIVE_STATUSES: ClaimStatus[] = [
   'submitted',
   'under_supervisor_review',
   'under_auditor_review',
@@ -95,6 +95,7 @@ export async function loadIntelligenceData(): Promise<IntelligenceData> {
 
   // ── Build contract → role → userIds map ─────────────────────────
   const contractRoleMaps = new Map<string, Map<string, string[]>>();
+
   for (const r of roles) {
     let roleMap = contractRoleMaps.get(r.contract_id);
     if (!roleMap) {
@@ -112,7 +113,7 @@ export async function loadIntelligenceData(): Promise<IntelligenceData> {
     roleMap.set('director', directorIds);
   });
 
-  // ── Enrich all claims ───────────────────────────────────────────────────────────────
+  // ── Enrich all claims ───────────────────────────────────────────
   const enrichedClaims: EnrichedClaim[] = claims.map(claim => {
     const roleMap = contractRoleMaps.get(claim.contract_id) || new Map<string, string[]>();
     // Supabase returns joined relations as arrays; enrichClaim expects object|null
@@ -121,12 +122,12 @@ export async function loadIntelligenceData(): Promise<IntelligenceData> {
     return enrichClaim({ ...claim, contracts: contractsObj }, roleMap, userNameMap);
   });
 
-  // ── Compute intelligence KPIs ────────────────────────────────────────────
+  // ── Compute intelligence KPIs ───────────────────────────────────
   const inProgress = enrichedClaims.filter(c => ACTIVE_STATUSES.includes(c.status));
   const delayed    = enrichedClaims.filter(c => c.sla.status === 'overdue');
   const warning    = enrichedClaims.filter(c => c.sla.status === 'warning');
   const approved   = enrichedClaims.filter(c => c.status === 'approved');
-  const rejected    = enrichedClaims.filter(c => c.status === 'rejected');
+  const rejected   = enrichedClaims.filter(c => c.status === 'rejected');
   const returned   = enrichedClaims.filter(c =>
     c.status === 'returned_by_supervisor' || c.status === 'returned_by_auditor'
   );

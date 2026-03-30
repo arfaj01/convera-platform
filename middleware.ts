@@ -56,12 +56,12 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
     'camera=(), microphone=(), geolocation=(), payment=()',
   );
   response.headers.set('Content-Security-Policy', CSP);
-  response.headers.set('X-XSS-Protection', '1; mode=block')
+  response.headers.set('X-XSS-Protection', '1; mode=block');
 
   if (process.env.NODE_ENV === 'production') {
     response.headers.set(
       'Strict-Transport-Security',
-      'max-age=315360000; includeSubDomains',
+      'max-age=31536000; includeSubDomains',
     );
   }
 

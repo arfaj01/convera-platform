@@ -75,7 +75,9 @@ export async function GET(
 
     audit.userId = user.id;
     const adminClient = createAdminSupabase();
-            const { data: profile, error: profileErr } = await adminClient
+
+    // ── 2. Load user profile ─────────────────────────────────────────
+    const { data: profile, error: profileErr } = await adminClient
       .from('profiles')
       .select('id, role, email')
       .eq('id', user.id)
@@ -85,12 +87,14 @@ export async function GET(
       audit.result = 'denied';
       audit.reason = 'Profile not found';
       logDownloadAttempt(audit as DownloadAuditEntry);
-      return jsonError('لم يتم العثورات الفلانات على ملف المستند', 404, 'PROFILE_NOT_FOUND');
+      return jsonError('لم يتم العثور على ملف المستخدم', 404, 'PROFILE_NOT_FOUND');
     }
 
     const userRole = profile.role as UserRole;
     audit.userRole = userRole;
-          const { data: doc, error: docErr } = await adminClient
+
+    // ── 3. Load document record ──────────────────────────────────────
+    const { data: doc, error: docErr } = await adminClient
       .from('documents')
       .select('id, name, original_name, file_path, file_size, mime_type, type, claim_id, contract_id, uploaded_by')
       .eq('id', documentId)
@@ -100,7 +104,7 @@ export async function GET(
       audit.result = 'not_found';
       audit.reason = 'Document record not found';
       logDownloadAttempt(audit as DownloadAuditEntry);
-      return jsonError('لف يتم العقد على ملف المستند', 404, 'DOCUMENT_NOT_FOUND');
+      return jsonError('لم يتم العثور على المستند', 404, 'DOCUMENT_NOT_FOUND');
     }
 
     const docRecord = doc as DocumentRecord;
@@ -118,12 +122,12 @@ export async function GET(
         .select('id, contract_id, status, submitted_by')
         .eq('id', docRecord.claim_id)
         .maybeSingle();
-        
+
       if (claimErr || !claimData) {
         audit.result = 'not_found';
         audit.reason = 'Associated claim not found';
         logDownloadAttempt(audit as DownloadAuditEntry);
-        return jsonError('associated claim not found', 404, 'CLAIM_NOT_FOUND');
+        return jsonError('لم يتم العثور على المطالبة المرتبطة', 404, 'CLAIM_NOT_FOUND');
       }
 
       claim = claimData as ClaimContext;
@@ -134,18 +138,20 @@ export async function GET(
       audit.result = 'error';
       audit.reason = 'No contract context';
       logDownloadAttempt(audit as DownloadAuditEntry);
-      return jsonError('No contract context', 400, 'NO_CONTRACT_CONTEXT');
+      return jsonError('لا يمكن تحديد العقد المرتبط بالمستند', 400, 'NO_CONTRACT_CONTEXT');
     }
 
     audit.contractId = contractId;
 
-    // ─── 5. Resolve contract role ────────────────────────────────────────────────────────
-    const { role: contractRole, source: roleSource } = await resolveContractRole(adminClient, user.id, contractId, userRole);
+    // ── 5. Resolve contract role ─────────────────────────────────────
+    const { role: contractRole, source: roleSource } = await resolveContractRole(
+      adminClient, user.id, contractId, userRole,
+    );
 
     audit.contractRole = contractRole;
     audit.roleSource = roleSource;
 
-    // ── 6. Enforce access via DocumentAccessService ───────────────────
+    // ── 6. Enforce access via DocumentAccessService ──────────────────
     const decision = canUserAccessDocument(docRecord, claim, contractRole, roleSource);
 
     if (!decision.allowed) {
@@ -153,21 +159,48 @@ export async function GET(
       audit.reason = decision.reason;
       logDownloadAttempt(audit as DownloadAuditEntry);
       return jsonError(
-        decision.code === 'CERTIFICATES_NOT_YET_AVAILABLE'
-          ? 'certificates not yet available'
-          : 'access denied',
+        decision.code === 'CERTIFICATE_NOT_YET_AVAILABLE'
+          ? 'لا يمكن تحميل شهادة الإنجاز إلا بعد اعتماد المطالبة من المدير'
+          : 'ليس لديك صلاحية للوصول إلى هذا المستند',
         403,
         decision.code,
       );
     }
-  
-  �turn NextResponse.json({ success: true }, { status: 200 });
+
+    // ── 7. Generate signed URL (short-lived, 120s) ───────────────────
+    const signedResult = await getSignedDownloadUrl(adminClient, docRecord.file_path);
+
+    if (!signedResult.ok || !signedResult.url) {
+      audit.result = 'not_found';
+      audit.reason = `Signed URL failed: ${signedResult.error}`;
+      logDownloadAttempt(audit as DownloadAuditEntry);
+
+      // If createSignedUrl fails → file is missing or path is wrong
+      return jsonError(
+        'الملف غير موجود في التخزين — قد يكون قد حُذف أو لم يُرفع بشكل صحيح',
+        404,
+        'FILE_NOT_IN_STORAGE',
+      );
+    }
+
+    // ── 8. Success ───────────────────────────────────────────────────
+    audit.result = 'success';
+    logDownloadAttempt(audit as DownloadAuditEntry);
+
+    return NextResponse.json(
+      { url: signedResult.url },
+      {
+        status: 200,
+        headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+      },
+    );
+
   } catch (error) {
     audit.result = 'error';
     audit.reason = error instanceof Error ? error.message : 'Unknown error';
     logDownloadAttempt(audit as DownloadAuditEntry);
 
-    console.error('[doc-download]', error);
-    return jsonError('Something went wrong', 500, 'INTERNAL_ERROR');
+    console.error('[doc-download] Unexpected error:', error);
+    return jsonError('حدث خطأ في الخادم', 500, 'INTERNAL_ERROR');
   }
 }

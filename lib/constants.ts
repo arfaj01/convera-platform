@@ -12,7 +12,7 @@ import type {
   NotificationType,
 } from './types';
 
-/* ─── MoMaH Official Brand Colors (from Ministry Brand Guidelines) ──
+// ─── MoMaH Official Brand Colors (from Ministry Brand Guidelines) ──
 
 /**
  * Official MoMaH color palette
@@ -30,7 +30,7 @@ export const MOMAH_COLORS = {
   gold: '#FFC845',           // PANTONE 1225C
 } as const;
 
-/* ─── Semantic Color Tokens (mapped to MoMaH brand) ──
+// ─── Semantic Color Tokens (mapped to MoMaH brand) ──
 
 export const COLOR_TOKENS = {
   primary: MOMAH_COLORS.darkGreen,
@@ -78,7 +78,7 @@ export const CLAIM_STATUS_LABELS: Record<ClaimStatus, string> = {
   cancelled: 'ملغاة',
 };
 
-// ─── Claim Status Colors (MoMaH Brand) ─────────────────────────────────
+// ─── Claim Status Colors (MoMaH Brand) ──────────────────────────
 
 /**
  * Status color scheme using MoMaH official colors
@@ -167,7 +167,7 @@ export function isConstructionContract(type: ContractType): boolean {
   return CONSTRUCTION_TYPES.includes(type);
 }
 
-/* ─── User Role Labels (Arabic) ──────────────────────────────────
+// ─── User Role Labels (Arabic) ──────────────────────────────────
 
 /**
  * 5-stage workflow roles:
@@ -226,7 +226,7 @@ export const WORKFLOW_ACTION_LABELS: Record<string, string> = {
   close: 'إغلاق',
 };
 
-/* ─── Change Order Type Labels ───────────────────────────────────
+// ─── Change Order Type Labels ───────────────────────────────────
 
 export const CHANGE_ORDER_TYPE_LABELS: Record<ChangeOrderType, string> = {
   addition: 'إضافة بنود جديدة',
@@ -248,7 +248,7 @@ export const CHANGE_ORDER_STATUS_LABELS: Record<ChangeOrderStatus, string> = {
   rejected: 'مرفوضة',
 };
 
-/* ─── Document Type Labels ──────────────────────────────────────
+// ─── Document Type Labels ──────────────────────────────────────
 
 export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   invoice: 'فاتورة / الفاتورة الضريبية',
@@ -346,7 +346,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
 ];
 
-/* ─── SLA & Governance Constants ─────────────────────────────────
+// ─── SLA & Governance Constants ─────────────────────────────────
 
 /**
  * Supervisor review SLA: 3 working days maximum
@@ -388,7 +388,7 @@ export const ALLOWED_DOCUMENT_FORMATS = ['application/pdf'];
 export function staffPositionColor(name: string): string {
   const n = (name || '').toLowerCase();
   if (n.includes('مدير')) return '#026D69';
-  if (n.includes('معلار')) return '#1A4B8C';
+  if (n.includes('معمار')) return '#1A4B8C';
   if (n.includes('مدن')) return '#6A5ACD';
   if (n.includes('كهرباء')) return '#B8860B';
   if (n.includes('ميكانيك')) return '#8B4513';
@@ -452,7 +452,7 @@ export const NOTIFICATION_TEMPLATES: Record<NotificationType, { title: string; b
   },
   change_order_submitted: {
     title: 'تم تقديم طلب تغيير جديد',
-    bodyTemplate: 'تم تقديم طلب تغيير #{orderNo} للعقد "{contractNo}" بقيمى {value}',
+    bodyTemplate: 'تم تقديم طلب تغيير #{orderNo} للعقد "{contractNo}" بقيمة {value}',
   },
   change_order_approved: {
     title: 'تم اعتماد طلب التغيير',
@@ -464,13 +464,13 @@ export const NOTIFICATION_TEMPLATES: Record<NotificationType, { title: string; b
   },
   change_order_approaching_limit: {
     title: 'تحذير: تقارب الحد الأقصى للتغييرات',
-    bodyTemplate: 'العقد "{contractNo}" يقترب من الحد الأقصى المسموح به للتغييرات ({ current }%)',
+    bodyTemplate: 'العقد "{contractNo}" يقترب من الحد الأقصى المسموح به للتغييرات ({current}%)',
   },
 };
 
-// ─── Error Messages (Arabic) ────────────────────────────────
+// ─── Error Messages (Arabic) ────────────────────────────────────
 
-export const ERROR_MESYA@�ES: Record<string, string> = {
+export const ERROR_MESSAGES: Record<string, string> = {
   UNAUTHORIZED: 'أنت غير مخول بالقيام بهذا الإجراء',
   NOT_FOUND: 'المورد المطلوب غير موجود',
   VALIDATION_ERROR: 'تحقق من صحة البيانات المدخلة',

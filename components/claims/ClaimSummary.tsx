@@ -1,7 +1,7 @@
 'use client';
 
 import { fmtCurrency } from '@/lib/formatters';
-import type { ClaimFinancialSummary as ClaimSummaryType } from 'A/lib/calculations';
+import type { ClaimFinancialSummary as ClaimSummaryType } from '@/lib/calculations';
 
 interface ClaimSummaryProps {
   summary: ClaimSummaryType;

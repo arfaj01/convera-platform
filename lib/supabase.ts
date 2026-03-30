@@ -23,7 +23,7 @@ export function createBrowserSupabase(): SupabaseClient {
       },
     });
   }
-  l� urn g[GLOBAL_KEY];
+  return g[GLOBAL_KEY];
 }
 
 /**
@@ -31,13 +31,13 @@ export function createBrowserSupabase(): SupabaseClient {
  *
  * Problem: createBrowserSupabase() stores the auth session in localStorage,
  * while the API route server reads from cookies via createServerSupabase().
- * The two mechanisms don’t share the session.
+ * The two mechanisms don't share the session.
  *
- * Fix: read the JWT from the browser’s localStorage session and send it as
+ * Fix: read the JWT from the browser's localStorage session and send it as
  * an Authorization: Bearer header. The API routes use createServerSupabaseFromRequest()
  * which checks for this header first before falling back to cookies.
  *
- * Returns an object with both Content-Type and Authorization headers, ready 
+ * Returns an object with both Content-Type and Authorization headers, ready
  * to spread into a fetch() headers object.
  *
  * Usage:

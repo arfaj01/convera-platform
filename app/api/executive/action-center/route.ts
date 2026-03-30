@@ -5,7 +5,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { withAuth, apiOk, apiError } from 'A/lib/api-guard';
+import { withAuth, apiOk, apiError } from '@/lib/api-guard';
 import { loadActionCenter } from '@/lib/action-center-service';
 
 export const GET = withAuth(

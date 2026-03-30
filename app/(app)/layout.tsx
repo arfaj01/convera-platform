@@ -2,10 +2,10 @@
 
 import { useState, useEffect, memo } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from 'A/components/AuthProvider';
+import { useAuth } from '@/components/AuthProvider';
 import Sidebar from '@/components/layout/Sidebar';
-import Topbar from 'A/components/layout/Topbar';
-import SessionTimeoutBanner from 'A/components/SessionTimeoutBanner';
+import Topbar from '@/components/layout/Topbar';
+import SessionTimeoutBanner from '@/components/SessionTimeoutBanner';
 
 const SIDEBAR_FULL = 230;
 const SIDEBAR_COLLAPSED = 64;
@@ -90,6 +90,5 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Session idle timeout warning — shown globally in authenticated layout */}
       <SessionTimeoutBanner />
     </div>
-  
-  }
+  );
 }
