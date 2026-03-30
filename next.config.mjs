@@ -17,7 +17,7 @@ const nextConfig = {
     // SVG logos served from /public/images — allow inline rendering
     dangerouslyAllowSVG: true,
     contentDispositionType: 'attachment',
-    contentSecurityPolicy": "default-src 'self'; script-src 'none'; sandbox;",
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
 
   // ─── Security headers (applied at Next.js level) ───────────────
@@ -54,18 +54,18 @@ const nextConfig = {
           },
           {
             // Tight CSP: only allow Supabase + self
-            // Adjust ngwxlockzkipmmzuvgak ngwxlockzkipmmzuvgak.supabase.co if project URL changes
+            // Adjust ngwxlockzkjpmzuvgakx.supabase.co if project URL changes
             key: 'Content-Security-Policy',
             value: [
-              "default-src 'self"",
+              "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",  // Next.js requires unsafe-inline/eval in dev; tighten for prod
-              "style-src 'self' 'unsafe-inline"",
-              "img-src 'self' data: blob: https://ngwxlockzkipmmzuvgak.supabase.co",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data: blob: https://ngwxlockzkjpmzuvgakx.supabase.co",
               "font-src 'self'",
               "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
               "frame-ancestors 'none'",
-              "base-uri 'self"",
-              "form-action 'self"",
+              "base-uri 'self'",
+              "form-action 'self'",
             ].join('; '),
           },
         ],
@@ -92,7 +92,11 @@ const nextConfig = {
     ];
   },
 
-  // ─── Rewrites / Redirects ───────────────────────────────────────────────────────────────
+  // ─── Rewrites / Redirects ─────────────────────────────────────
+  // Password reset pages are public — ensure no auth redirect intercepts
+  async redirects() {
+    return [];  // Auth redirect is handled in middleware.ts
+  },
+};
 
-�]]�Y\�X�\�[�Y[�ZY]�\�K�\�[���Y\�X��
-H�]\���N���]]�Y\�X�\�[�Y[�ZY]�\�K�K�N�^ܝY�][�^�ۙ�Y��
+export default nextConfig;
