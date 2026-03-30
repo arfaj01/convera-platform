@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── MasmakBHD Bold Font (MoMaH Official) ──────────────────────────
+   Source: FRONTEND FONT.otf (AL MOHTARAF ASSAUDI LTD.)
+   Used for ALL text — headings, body, labels, numbers.
+───────────────────────────────────────────────────────────────────── */
+@font-face {
+  font-family: 'MasmakBHD';
+  src: url('/fonts/MasmakBHD-Bold.otf') format('opentype');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── MoMaH Design Tokens (Brand Guidelines V.01) ───────────────────
+   PANTONE 7476C  = #045859  primary
+   PANTONE 376C   = #87BA26  success/approved
+   PANTONE CoolGrey11C = #54565B  secondary text
+   PANTONE 326C   = #00A79D  teal/info
+   PANTONE 7680C  = #502C7C  purple/auditor
+   PANTONE 167C   = #C05728  orange/danger
+   PANTONE 1225C  = #FFC845  gold/warning
+───────────────────────────────────────────────────────────────────── */
+:root {
+  --primary:        #045859;
+  --primary-d:      #034342;
+  --primary-l:      #087272;
+  --primary-p:      #E8F4F4;
+  --primary-u:      #F0FAFA;
+  --success:        #87BA26;
+  --success-p:      #F0F7E0;
+  --warning:        #FFC845;
+  --warning-p:      #FFF8E0;
+  --danger:         #C05728;
+  --danger-p:       #FAEEE8;
+  --info:           #00A79D;
+  --info-p:         #E0F4F3;
+  --purple:         #502C7C;
+  --purple-p:       #EDE7F6;
+  --text-primary:   #1A1A2E;
+  --text-secondary: #54565B;
+  --border:         #DDE2E8;
+  --bg-page:        #F7F8FA;
+  --bg-card:        #FFFFFF;
+  --bg-sidebar:     #045859;
+  --bg-topbar:      #034342;
+
+  /* Legacy aliases for backward-compat with existing components */
+  --teal:   #045859;
+  --teal-d: #034342;
+  --teal-l: #087272;
+  --teal-p: #E8F4F4;
+  --teal-u: #F0FAFA;
+  --lime:   #87BA26;
+  --lime-d: #6A9E00;
+  --lime-p: #F0F7E0;
+  --g50:    #F7F8FA;
+  --g100:   #E8F4F4;
+  --g200:   #DDE2E8;
+  --g400:   #54565B;
+  --g600:   #34393E;
+  --g800:   #1A1A2E;
+  --sw:     230px;
+  --hh:     64px;
+}
+
+html {
+  direction: rtl;
+}
+
+body {
+  font-family: 'MasmakBHD', 'Tajawal', sans-serif;
+  font-weight: bold;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Animations ─────────────────────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fade-in  { animation: fade-in 0.25s ease-out; }
+.animate-slide-in { animation: slide-in-right 0.25s ease-out; }
+
+/* ── Scrollbar ───────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--g200); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--g400); }
+
+@media print {
+  body {
+    background: white;
+    font-family: 'MasmakBHD', 'Tajawal', sans-serif;
+    font-weight: bold;
+    color: #1A1A2E;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide interactive chrome */
+  .no-print,
+  .print\\:hidden { display: none !important; }
+
+  /* Ensure branded headers show */
+  .print\\:block { display: block !important; }
+  .print\\:flex  { display: flex  !important; }
+
+  /* Table headers keep MoMaH green background when printed */
+  thead tr { background: #045859 !important; color: #fff !important; }
+
+  /* Page margins */
+  @page {
+    margin: 14mm 16mm;
+    size: A4 portrait;
+  }
+
+  /* Avoid page breaks inside rows / cards */
+  tr, .card { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+}
