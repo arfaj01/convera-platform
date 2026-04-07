@@ -176,18 +176,20 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
   // dynamically at the API level via the contract_approvers table (migration 040).
   // The allowedRoles here serve as static client-side hints — the real check
   // for non-director final approvers is in /api/claims/transition.
+  // NOTE: 'director' and 'final_approver' both have access here.
+  // final_approver is contract-scoped — API enforces contract_approvers check.
   pending_director_approval: [
     {
       action: 'approve',
       toStatus: 'approved',
-      allowedRoles: ['director'],
+      allowedRoles: ['director', 'final_approver'],
       requiresNote: false,
       description: 'المعتمد النهائي يعتمد المطالبة نهائياً',
     },
     {
       action: 'reject',
       toStatus: 'rejected',
-      allowedRoles: ['director'],
+      allowedRoles: ['director', 'final_approver'],
       requiresNote: true,
       minNoteLength: 20,
       description: 'المعتمد النهائي يرفض المطالبة',
@@ -195,7 +197,7 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
     {
       action: 'return',
       toStatus: 'under_auditor_review',
-      allowedRoles: ['director'],
+      allowedRoles: ['director', 'final_approver'],
       requiresNote: true,
       minNoteLength: 20,
       description: 'المعتمد النهائي يرجع للمدقق للمراجعة الإضافية',
@@ -386,7 +388,7 @@ export function getExpectedActorRole(status: ClaimStatus): UserRole | null {
     under_auditor_review: 'auditor',
     returned_by_auditor: 'contractor',
     under_reviewer_check: 'reviewer',
-    pending_director_approval: 'director',
+    pending_director_approval: 'final_approver',
     approved: null,
     rejected: null,
     cancelled: null,
@@ -593,7 +595,7 @@ export function contractRoleToWorkflowRole(contractRole: ContractRole): UserRole
     supervisor: 'supervisor',
     auditor:    'auditor',
     reviewer:   'reviewer',
-    final_approver: 'director', // final_approver maps to director workflow actions
+    final_approver: 'final_approver', // maps to final_approver workflow actions (now a first-class role)
     viewer:     null,
   };
   return map[contractRole] ?? null;
