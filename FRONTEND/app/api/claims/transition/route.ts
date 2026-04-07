@@ -325,14 +325,14 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transitio
 
     // Special handling for pending_director_approval stage — check contract_approvers
     if (claim.status === 'pending_director_approval' && ['approve', 'reject', 'return'].includes(action)) {
-      // Director always has access
+      // Director always has access (platform owner)
       if (userRole === 'director') {
         const result = isTransitionAllowed(claim.status, action, 'director');
         allowed = result.allowed;
         toStatus = result.toStatus;
         transitionErr = result.error;
-      } else {
-        // Check if user is a final approver on this contract (via contract_approvers table)
+      } else if (userRole === 'final_approver') {
+        // Profile-level final_approver — still must be designated on this contract
         const { count: approverCount } = await adminClient
           .from('contract_approvers')
           .select('id', { count: 'exact', head: true })
@@ -342,7 +342,26 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transitio
           .eq('is_active', true);
 
         if ((approverCount ?? 0) > 0) {
-          // User is a designated final approver — allow director-level actions
+          // User is a designated final approver — allow final approval actions
+          const result = isTransitionAllowed(claim.status, action, 'final_approver');
+          allowed = result.allowed;
+          toStatus = result.toStatus;
+          transitionErr = result.error;
+        } else {
+          allowed = false;
+          transitionErr = 'أنت معتمد نهائي لكن غير معيّن على هذا العقد — تواصل مع مدير الإدارة';
+        }
+      } else {
+        // Other roles: check if they have contract_approvers entry (legacy support)
+        const { count: approverCount } = await adminClient
+          .from('contract_approvers')
+          .select('id', { count: 'exact', head: true })
+          .eq('contract_id', claim.contract_id)
+          .eq('user_id', actorId)
+          .eq('approval_scope', 'final_approver')
+          .eq('is_active', true);
+
+        if ((approverCount ?? 0) > 0) {
           const result = isTransitionAllowed(claim.status, action, 'director');
           allowed = result.allowed;
           toStatus = result.toStatus;
