@@ -1,7 +1,8 @@
 // ─── Database Enums ──────────────────────────────────────────────
 /**
  * User roles in CONVERA platform
- * - director: Final approval authority (مدير الإدارة)
+ * - director: Platform owner — Mohammed Al-Arfaj only (مدير الإدارة)
+ * - final_approver: Designated final approver per contract (المعتمد النهائي)
  * - admin: Internal auditor/system administrator (مدقق / مشرف النظام)
  * - reviewer: Governance/alignment reviewer (مراجع)
  * - consultant: External consulting firm representative (جهة الإشراف)
@@ -9,7 +10,7 @@
  * Legacy aliases kept for backward compatibility:
  * - auditor → admin, supervisor → consultant
  */
-export type UserRole = 'director' | 'admin' | 'reviewer' | 'consultant' | 'contractor' | 'auditor' | 'supervisor';
+export type UserRole = 'director' | 'admin' | 'reviewer' | 'consultant' | 'contractor' | 'auditor' | 'supervisor' | 'final_approver';
 
 /**
  * Contract-scoped roles (from user_contract_roles table — migration 025).
