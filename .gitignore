@@ -16,3 +16,10 @@
 .DS_Store
 *.tsbuildinfo
 next-env.d.ts
+
+# Cleanup: prevent re-introducing junk at repo root
+/TEST_FILE.txt
+/test*.txt
+/uat-*.mjs
+/uat-*.html
+/index.html
