@@ -45,7 +45,12 @@ export default function ClaimDetailPage() {
   const [staffItems, setStaffItems] = useState<ClaimStaffItem[]>([]);
   const [workflow, setWorkflow] = useState<ClaimWorkflowType[]>([]);
   const [documents, setDocuments] = useState<ClaimDocument[]>([]);
-  const [contractRole, setContractRole] = useState<ContractRole | null>(null);
+  // Migration 045: a user may hold MULTIPLE contract roles on the same
+  // contract. Track all of them and pass the array to the action engine.
+  const [contractRoles, setContractRoles] = useState<ContractRole[]>([]);
+  // Backward-compat single-role accessor for downstream consumers that
+  // still expect one value (e.g. AttachmentsCard / filterVisibleDocuments).
+  const contractRole: ContractRole | null = contractRoles[0] ?? null;
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
@@ -60,12 +65,17 @@ export default function ClaimDetailPage() {
       ]);
       if (c) {
         setClaim(c);
-        // Resolve contract role for this specific contract
+        // Resolve ALL contract roles for this specific contract (multi-role).
+        // After Migration 045, fetchMyContractRoles() may return multiple
+        // rows for the same (user, contract) pair — one per distinct role.
         const contractId = c.contract_id;
-        const role = myRoles.find((r: { contract_id: string }) => r.contract_id === contractId);
-        if (role) {
-          setContractRole(role.contract_role as ContractRole);
-        }
+        const matched = (myRoles as { contract_id: string; contract_role: string }[])
+          .filter((r) => r.contract_id === contractId)
+          .map((r) => r.contract_role as ContractRole);
+        // Defensive dedup (DB enforces uniqueness already).
+        const deduped: ContractRole[] = [];
+        for (const r of matched) if (!deduped.includes(r)) deduped.push(r);
+        setContractRoles(deduped);
       }
       setBoqItems(boq);
       setStaffItems(staff);
@@ -96,7 +106,9 @@ export default function ClaimDetailPage() {
   const actionContext: ActionContext | null = profile ? buildActionContext({
     userId: profile.id,
     globalRole: profile.role,
-    contractRole: contractRole,
+    // Multi-role: pass the full set; engine matches transitions against
+    // any of them. Empty array → engine falls back to globalRole.
+    contractRoles: contractRoles,
     isGlobalRole: isDirector,
     claim: {
       status: claim.status,

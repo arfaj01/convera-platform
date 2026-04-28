@@ -482,7 +482,9 @@ export default function WorkflowPage() {
   const [filter, setFilter]       = useState<ClaimStatus | 'all'>('all');
   const [hasScope, setHasScope]   = useState(true);
   const [effectiveRole, setEffectiveRole] = useState<UserRole | undefined>(undefined);
-  const [roleByContract, setRoleByContract] = useState<Map<string, ContractRole>>(new Map());
+  // Map<contract_id, ContractRole[]> — Migration 045: a user may hold
+  // MULTIPLE contract_role rows for the same contract. Track all of them.
+  const [rolesByContract, setRolesByContract] = useState<Map<string, ContractRole[]>>(new Map());
 
   const userRole   = profile?.role as UserRole | undefined;
   const isDirector = userRole === 'director';
@@ -517,33 +519,51 @@ export default function WorkflowPage() {
             viewer: userRole || 'contractor',
           };
 
-          // Build map: contract_id → ContractRole (for action engine)
-          const cRoleMap = new Map<string, ContractRole>();
+          // Build map: contract_id → ContractRole[] (multi-role aware).
+          // After Migration 045 a user may have multiple rows for the
+          // same contract, one per distinct role. Append, don't overwrite.
+          const cRoleMap = new Map<string, ContractRole[]>();
           for (const r of myRoles) {
-            cRoleMap.set(r.contract_id, r.contract_role as ContractRole);
+            const cid = r.contract_id;
+            const role = r.contract_role as ContractRole;
+            const existing = cRoleMap.get(cid) ?? [];
+            if (!existing.includes(role)) existing.push(role);
+            cRoleMap.set(cid, existing);
           }
-          setRoleByContract(cRoleMap);
+          setRolesByContract(cRoleMap);
 
           const actionable: PendingClaim[] = [];
           let primaryRole: ContractRole | null = null;
 
           for (const claim of all) {
-            const cRole = myRoles.find(r => r.contract_id === claim.contract_id)?.contract_role as ContractRole | undefined;
-            if (!cRole) continue;
+            const cRoles = cRoleMap.get(claim.contract_id) ?? [];
+            if (cRoles.length === 0) continue;
 
-            if (cRole === 'contractor') {
-              if (claim.status === 'returned_by_supervisor' || claim.status === 'returned_by_auditor') {
-                actionable.push(claim);
-                if (!primaryRole) primaryRole = 'contractor';
+            let matched = false;
+
+            // Contractor view: their action surface is the "returned" stages.
+            if (
+              cRoles.includes('contractor') &&
+              (claim.status === 'returned_by_supervisor' ||
+                claim.status === 'returned_by_auditor')
+            ) {
+              matched = true;
+              if (!primaryRole) primaryRole = 'contractor';
+            }
+
+            // Workflow-gating roles: any role whose CONTRACT_ROLE_STATUSES
+            // entry matches the claim's current status.
+            for (const cr of cRoles) {
+              if (cr === 'contractor') continue;
+              const statuses = CONTRACT_ROLE_STATUSES[cr];
+              if (statuses && statuses.includes(claim.status)) {
+                matched = true;
+                if (!primaryRole) primaryRole = cr;
+                break;
               }
-              continue;
             }
 
-            const statuses = CONTRACT_ROLE_STATUSES[cRole];
-            if (statuses && statuses.includes(claim.status)) {
-              actionable.push(claim);
-              if (!primaryRole) primaryRole = cRole;
-            }
+            if (matched) actionable.push(claim);
           }
 
           setClaims(actionable);
@@ -574,11 +594,14 @@ export default function WorkflowPage() {
 
   // ── Build action context for each claim ──
   const getActionContext = (claim: PendingClaim): ActionContext => {
-    const cRole = roleByContract.get(claim.contract_id) || null;
+    // Multi-role aware: pass ALL of the user's roles on this contract.
+    // Director short-circuits to an empty array — the engine treats them
+    // as a global role via isGlobalRole.
+    const cRoles = isDirector ? [] : (rolesByContract.get(claim.contract_id) ?? []);
     return buildActionContext({
       userId: profile?.id || '',
       globalRole: userRole || 'contractor',
-      contractRole: isDirector ? null : cRole,
+      contractRoles: cRoles,
       isGlobalRole: isDirector,
       claim: { status: claim.status },
       documents: [], // workflow page doesn't load docs; approval check happens server-side
