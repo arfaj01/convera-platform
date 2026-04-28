@@ -163,6 +163,12 @@ function resolveWorkflowRole(ctx: ActionContext): UserRole {
       auditor:    'auditor',
       reviewer:   'reviewer',
       viewer:     ctx.globalRole, // viewer has no workflow actions
+      // Migration 045 additions — advisory roles, no workflow gate.
+      // Fall back to globalRole so resolution stays defined; workflow
+      // actions still won't appear because these roles aren't listed
+      // in any CLAIM_TRANSITIONS.allowedRoles.
+      project_manager: ctx.globalRole,
+      quality:         ctx.globalRole,
       final_approver: 'final_approver',
     };
     return map[ctx.contractRole];
@@ -585,6 +591,10 @@ export function buildActionContext(params: {
         auditor:    'auditor',
         reviewer:   'reviewer',
         viewer:     params.globalRole,
+        // Migration 045 additions — advisory only, never the expected
+        // actor on a workflow stage.
+        project_manager: params.globalRole,
+        quality:         params.globalRole,
         final_approver: 'final_approver',
       };
       isExpectedActor = roleMap[params.contractRole] === expectedRole;

@@ -597,6 +597,11 @@ export function contractRoleToWorkflowRole(contractRole: ContractRole): UserRole
     reviewer:   'reviewer',
     final_approver: 'final_approver', // maps to final_approver workflow actions (now a first-class role)
     viewer:     null,
+    // Migration 045 additions — advisory only, no workflow mapping yet.
+    // Returning null means contractRoleToWorkflowRole(role) → null,
+    // which falls back to the existing "no workflow actions" behaviour.
+    project_manager: null,
+    quality:         null,
   };
   return map[contractRole] ?? null;
 }

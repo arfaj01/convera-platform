@@ -164,6 +164,9 @@ function contractRoleToWorkflowRole(contractRole: ContractRole): UserRole | null
     auditor: 'auditor',
     reviewer: 'reviewer',
     viewer: null,
+    // Migration 045 additions — advisory roles, no workflow mapping yet.
+    project_manager: null,
+    quality: null,
     final_approver: 'final_approver',
   };
   return map[contractRole] ?? null;

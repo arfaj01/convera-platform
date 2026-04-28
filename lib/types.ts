@@ -13,8 +13,26 @@
 export type UserRole = 'director' | 'admin' | 'reviewer' | 'consultant' | 'contractor' | 'auditor' | 'supervisor' | 'final_approver';
 
 /**
- * Contract-scoped roles (from user_contract_roles table — migration 025).
+ * Contract-scoped roles (from user_contract_roles table — migrations 025 + 045).
  * Maps to the contract_role PostgreSQL enum.
+ *
+ * Migration 045 (2026-04-28) extended the enum with three new values
+ * (project_manager, quality, final_approver) and relaxed the row-level
+ * uniqueness key on user_contract_roles from
+ *   UNIQUE(user_id, contract_id)            (one role per contract)
+ * to
+ *   UNIQUE(user_id, contract_id, contract_role)
+ * so a single user may now hold MORE THAN ONE role on the same contract.
+ *
+ * Semantics:
+ *   contractor       — مقاول: creates and submits claims
+ *   supervisor       — جهة الإشراف (مكتب استشاري): supervisor stage gate
+ *   auditor          — مدقق: auditor stage gate
+ *   reviewer         — مراجع (governance): reviewer stage gate
+ *   viewer           — read-only access
+ *   project_manager  — مدير مشروع: nudge / escalation only, no workflow gate
+ *   quality          — جودة: comment / advisory only, no workflow gate
+ *   final_approver   — معتمد نهائي: contract-scoped final approval authority
  *
  * Mapping from legacy UserRole → ContractRole:
  *   contractor  → contractor
@@ -23,7 +41,15 @@ export type UserRole = 'director' | 'admin' | 'reviewer' | 'consultant' | 'contr
  *   reviewer    → reviewer
  *   director    → N/A (global, not contract-scoped)
  */
-export type ContractRole = 'contractor' | 'supervisor' | 'auditor' | 'reviewer' | 'viewer' | 'final_approver';
+export type ContractRole =
+  | 'contractor'
+  | 'supervisor'
+  | 'auditor'
+  | 'reviewer'
+  | 'viewer'
+  | 'project_manager'
+  | 'quality'
+  | 'final_approver';
 
 /**
  * A user's role assignment on a specific contract.
