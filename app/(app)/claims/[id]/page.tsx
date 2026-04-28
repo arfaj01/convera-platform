@@ -34,6 +34,19 @@ import type { ClaimWorkflow as ClaimWorkflowType, ClaimStatus, ClaimBOQItem, Cla
 import { assessClaimSLA, type SLAAssessment } from '@/lib/sla-escalation';
 import { filterVisibleDocuments } from '@/lib/document-access';
 
+// ─── ContractRole → Arabic labels (display only) ────────────────
+// Used by the multi-role badges strip. Pure display layer; no logic.
+const CONTRACT_ROLE_LABELS: Record<ContractRole, string> = {
+  contractor:      'مقاول',
+  supervisor:      'جهة الإشراف',
+  auditor:         'مدقق',
+  reviewer:        'مراجع',
+  viewer:          'مُشاهد',
+  project_manager: 'مدير مشروع',
+  quality:         'جودة',
+  final_approver:  'معتمد نهائي',
+};
+
 export default function ClaimDetailPage() {
   const params = useParams();
   const { profile } = useAuth();
@@ -149,6 +162,31 @@ export default function ClaimDetailPage() {
           </div>
         }
       />
+
+      {/* Multi-role badges strip — shown when the user holds at least one
+          contract-scoped role on this claim's contract. The first role in
+          contractRoles is rendered as the "primary" pill (filled teal);
+          additional roles are outlined. Hidden for global-role directors
+          (they have implicit access via isGlobalRole). */}
+      {!isDirector && contractRoles.length > 0 && (
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-teal-pale border border-teal/20 rounded-sm text-xs">
+          <span className="text-teal-dark font-bold flex-shrink-0">الأدوار:</span>
+          <div className="flex gap-1.5 flex-wrap">
+            {contractRoles.map((role, idx) => (
+              <span
+                key={role}
+                className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-bold ${
+                  idx === 0
+                    ? 'bg-teal text-white'
+                    : 'bg-white text-teal-dark border border-teal/30'
+                }`}
+              >
+                {CONTRACT_ROLE_LABELS[role] ?? role}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Main info */}
