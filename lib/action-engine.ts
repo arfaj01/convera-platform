@@ -98,7 +98,21 @@ export interface ActionContext {
   userId: string;
   /** User's global role (from profiles.role) */
   globalRole: UserRole;
-  /** User's contract-scoped role on this claim's contract (null = global access) */
+  /**
+   * ALL contract-scoped roles the user holds on this claim's contract.
+   * After Migration 045 a single (user, contract) pair may carry MORE
+   * than one role (e.g. supervisor + quality, or auditor + final_approver).
+   * Empty array = no contract-scoped role on this contract; the engine
+   * falls back to the user's globalRole for resolution.
+   */
+  contractRoles: ContractRole[];
+  /**
+   * Backward-compat alias — equal to `contractRoles[0] ?? null`. Existing
+   * call sites that read a single role still work unchanged. New code
+   * should read `contractRoles` directly so multi-role authority is
+   * honoured.
+   * @deprecated since Phase 2B.2.2 — prefer `contractRoles`.
+   */
   contractRole: ContractRole | null;
   /** Is this a global-role user (e.g. director) with unrestricted access? */
   isGlobalRole: boolean;
@@ -146,35 +160,73 @@ const LEGACY_WORKFLOW_MAP: Partial<Record<UserRole, UserRole>> = {
 };
 
 /**
- * Resolves the effective UserRole used for CLAIM_TRANSITIONS lookup.
+ * Maps a single ContractRole → UserRole used by CLAIM_TRANSITIONS.
+ * Advisory roles (viewer, project_manager, quality) have no workflow
+ * gate, so they fall back to the user's globalRole. final_approver is
+ * a first-class workflow role.
+ */
+function contractRoleToWorkflowRole(
+  role: ContractRole,
+  globalRole: UserRole,
+): UserRole {
+  const map: Record<ContractRole, UserRole> = {
+    contractor: 'contractor',
+    supervisor: 'supervisor',
+    auditor:    'auditor',
+    reviewer:   'reviewer',
+    viewer:     globalRole, // viewer has no workflow actions
+    // Migration 045 additions — advisory only, no workflow gate.
+    // Returning globalRole keeps resolution defined; these roles still
+    // produce no actions because they aren't in any CLAIM_TRANSITIONS.allowedRoles.
+    project_manager: globalRole,
+    quality:         globalRole,
+    final_approver: 'final_approver',
+  };
+  return map[role];
+}
+
+/**
+ * Resolves ALL effective UserRoles the user can act with on this claim's
+ * stage transitions. After Migration 045 a user can hold multiple
+ * contract roles, so this returns a deduplicated array.
  *
  * Priority:
- *   1. Global role (director) → 'director'
- *   2. Contract role → mapped UserRole
- *   3. Legacy fallback: map profiles.role to workflow role
- *      (consultant → supervisor, admin → auditor)
+ *   1. Global role (director) → [globalRole]
+ *   2. Each contract role → its mapped workflow UserRole (deduped)
+ *   3. Safe fallback: if contractRoles is empty AND user is not global,
+ *      use the legacy LEGACY_WORKFLOW_MAP mapping of globalRole, OR fall
+ *      through to globalRole itself.
+ */
+function resolveWorkflowRoles(ctx: ActionContext): UserRole[] {
+  if (ctx.isGlobalRole) return [ctx.globalRole];
+
+  if (ctx.contractRoles.length > 0) {
+    // Plain-array dedup (no Set) so this compiles under the project's
+    // default ES target without requiring --downlevelIteration.
+    const out: UserRole[] = [];
+    for (const cr of ctx.contractRoles) {
+      const wr = contractRoleToWorkflowRole(cr, ctx.globalRole);
+      if (!out.includes(wr)) out.push(wr);
+    }
+    return out;
+  }
+
+  // Safe fallback: no contract role on this contract → use legacy
+  // profiles.role mapping (consultant → supervisor, admin → auditor),
+  // or the globalRole itself if no legacy alias applies.
+  return [LEGACY_WORKFLOW_MAP[ctx.globalRole] || ctx.globalRole];
+}
+
+/**
+ * Backward-compat single-value resolver — returns the first workflow
+ * role from the multi-role resolver. Existing call sites that expect a
+ * single UserRole keep working.
+ *
+ * @deprecated since Phase 2B.2.2 — prefer `resolveWorkflowRoles`.
  */
 function resolveWorkflowRole(ctx: ActionContext): UserRole {
-  if (ctx.isGlobalRole) return ctx.globalRole;
-  if (ctx.contractRole) {
-    const map: Record<ContractRole, UserRole> = {
-      contractor: 'contractor',
-      supervisor: 'supervisor',
-      auditor:    'auditor',
-      reviewer:   'reviewer',
-      viewer:     ctx.globalRole, // viewer has no workflow actions
-      // Migration 045 additions — advisory roles, no workflow gate.
-      // Fall back to globalRole so resolution stays defined; workflow
-      // actions still won't appear because these roles aren't listed
-      // in any CLAIM_TRANSITIONS.allowedRoles.
-      project_manager: ctx.globalRole,
-      quality:         ctx.globalRole,
-      final_approver: 'final_approver',
-    };
-    return map[ctx.contractRole];
-  }
-  // Legacy fallback: profiles.role uses old names
-  return LEGACY_WORKFLOW_MAP[ctx.globalRole] || ctx.globalRole;
+  const roles = resolveWorkflowRoles(ctx);
+  return roles[0] ?? ctx.globalRole;
 }
 
 // ─── Document Validation ─────────────────────────────────────────
@@ -212,7 +264,7 @@ const NEEDS_DOCS_FOR_APPROVAL: ClaimStatus[] = [
  */
 export function getAvailableActionsForClaim(ctx: ActionContext): ClaimAction[] {
   const actions: ClaimAction[] = [];
-  const workflowRole = resolveWorkflowRole(ctx);
+  const workflowRoles = resolveWorkflowRoles(ctx);
 
   // Terminal states: view-only, no actions
   if (isTerminalStatus(ctx.claimStatus)) {
@@ -238,10 +290,21 @@ export function getAvailableActionsForClaim(ctx: ActionContext): ClaimAction[] {
   }
 
   // ── A) Workflow Actions (from CLAIM_TRANSITIONS state machine) ──
+  //
+  // Multi-role: a user may hold multiple contract roles after Migration
+  // 045 (e.g. supervisor + final_approver). The transition matches if
+  // ANY of the user's resolved workflow roles is in `t.allowedRoles`.
+  // Each transition is added at most once (deduped by action) so the
+  // UI doesn't render duplicate buttons for users with overlapping roles.
 
+  const seenWorkflowActions = new Set<string>();
   const transitions = CLAIM_TRANSITIONS[ctx.claimStatus] || [];
   for (const t of transitions) {
-    if (!t.allowedRoles.includes(workflowRole)) continue;
+    // OLD: allowedRoles.includes(contractRole)
+    // NEW: allowedRoles.some(role => contractRoles.includes(role))
+    //      …implemented over the resolved workflowRoles set.
+    const matched = t.allowedRoles.some((ar) => workflowRoles.includes(ar));
+    if (!matched) continue;
 
     // Permission gate: verify user actually has the right to act
     const isDirectorAction = t.allowedRoles.includes('director');
@@ -250,18 +313,25 @@ export function getAvailableActionsForClaim(ctx: ActionContext): ClaimAction[] {
     if (isDirectorAction) {
       // Director-stage actions: only actual directors
       hasPermission = ctx.isGlobalRole && ctx.globalRole === 'director';
-    } else if (ctx.contractRole && ctx.contractRole !== 'viewer') {
-      // Explicit contract role from user_contract_roles table
+    } else if (
+      ctx.contractRoles.some(
+        (cr) => cr !== 'viewer' && cr !== 'project_manager' && cr !== 'quality',
+      )
+    ) {
+      // At least one gating contract role (i.e. not advisory) is held.
       hasPermission = true;
-    } else if (!ctx.contractRole && !ctx.isGlobalRole) {
+    } else if (ctx.contractRoles.length === 0 && !ctx.isGlobalRole) {
       // Legacy fallback: no user_contract_roles entry, but globalRole
       // maps to a valid workflow role via LEGACY_WORKFLOW_MAP.
-      // resolveWorkflowRole already applied the mapping and it passed
+      // resolveWorkflowRoles already applied the mapping and it passed
       // the allowedRoles check above, so allow it.
       hasPermission = true;
     }
 
     if (!hasPermission) continue;
+
+    if (seenWorkflowActions.has(t.action)) continue;
+    seenWorkflowActions.add(t.action);
 
     const action = buildWorkflowAction(t, ctx);
     if (action) actions.push(action);
@@ -469,14 +539,16 @@ function buildWorkflowAction(t: TransitionDef, ctx: ActionContext): ClaimAction 
 // ─── Internal Helpers ────────────────────────────────────────────
 
 function isContractorOnClaim(ctx: ActionContext): boolean {
-  if (ctx.contractRole === 'contractor') return true;
-  // Legacy: check global role
+  // Multi-role aware: user is a contractor if ANY of their roles is contractor.
+  if (ctx.contractRoles.includes('contractor')) return true;
+  // Legacy: check global role when no contract role is set
   if (ctx.globalRole === 'contractor') return true;
   return false;
 }
 
 function isSupervisorOnClaim(ctx: ActionContext): boolean {
-  if (ctx.contractRole === 'supervisor') return true;
+  // Multi-role aware
+  if (ctx.contractRoles.includes('supervisor')) return true;
   // Legacy: consultant maps to supervisor
   if (ctx.globalRole === 'consultant' || ctx.globalRole === 'supervisor') return true;
   return false;
@@ -561,7 +633,18 @@ export function actionVariantToButtonVariant(v: ActionVariant): 'teal' | 'red' |
 export function buildActionContext(params: {
   userId: string;
   globalRole: UserRole;
-  contractRole: ContractRole | null;
+  /**
+   * Preferred (multi-role) input. After Migration 045 a user may hold
+   * multiple contract roles on the same contract. Pass all of them.
+   */
+  contractRoles?: ContractRole[];
+  /**
+   * Backward-compat single-role input. If `contractRoles` is omitted
+   * but `contractRole` is provided, it is treated as a one-element
+   * array. Existing callers that pass a single role keep working.
+   * @deprecated since Phase 2B.2.2 — pass `contractRoles` instead.
+   */
+  contractRole?: ContractRole | null;
   isGlobalRole: boolean;
   claim: {
     status: ClaimStatus;
@@ -573,31 +656,33 @@ export function buildActionContext(params: {
   slaDaysElapsed?: number;
   slaBreached?: boolean;
 }): ActionContext {
+  // Normalise role input. Prefer the new multi-role field; fall back
+  // to the legacy single-role field. Empty array means no contract
+  // role on this contract — the resolver will use globalRole instead.
+  // Plain-array dedup (no Set) so this compiles under the project's
+  // default ES target without requiring --downlevelIteration.
+  const contractRoles: ContractRole[] = [];
+  const inputRoles: ContractRole[] = params.contractRoles
+    ?? (params.contractRole ? [params.contractRole] : []);
+  for (const r of inputRoles) {
+    if (!contractRoles.includes(r)) contractRoles.push(r);
+  }
+
   const hasInvoice = params.documents.some(d => d.type === 'invoice');
   const hasTechnicalReport = params.documents.some(d => d.type === 'report');
   const hasCompletionCertificate = params.claim.has_completion_certificate === true
     || params.documents.some(d => d.type === 'completion_certificate');
   const expectedRole = getExpectedActorRole(params.claim.status as ClaimStatus);
 
-  // Determine if user is the expected actor
+  // Determine if user is the expected actor — any of their roles maps to it.
   let isExpectedActor = false;
   if (expectedRole) {
     if (expectedRole === 'director' && params.isGlobalRole && params.globalRole === 'director') {
       isExpectedActor = true;
-    } else if (params.contractRole) {
-      const roleMap: Record<ContractRole, UserRole> = {
-        contractor: 'contractor',
-        supervisor: 'supervisor',
-        auditor:    'auditor',
-        reviewer:   'reviewer',
-        viewer:     params.globalRole,
-        // Migration 045 additions — advisory only, never the expected
-        // actor on a workflow stage.
-        project_manager: params.globalRole,
-        quality:         params.globalRole,
-        final_approver: 'final_approver',
-      };
-      isExpectedActor = roleMap[params.contractRole] === expectedRole;
+    } else if (contractRoles.length > 0) {
+      isExpectedActor = contractRoles.some(
+        (cr) => contractRoleToWorkflowRole(cr, params.globalRole) === expectedRole,
+      );
     } else if (params.globalRole === expectedRole) {
       isExpectedActor = true;
     }
@@ -606,7 +691,9 @@ export function buildActionContext(params: {
   return {
     userId: params.userId,
     globalRole: params.globalRole,
-    contractRole: params.contractRole,
+    contractRoles,
+    // Backward-compat alias — first role or null.
+    contractRole: contractRoles[0] ?? null,
     isGlobalRole: params.isGlobalRole,
     claimStatus: params.claim.status as ClaimStatus,
     submittedBy: params.claim.submitted_by || null,
