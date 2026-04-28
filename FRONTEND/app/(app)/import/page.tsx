@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { useAuth } from '@/components/AuthProvider';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
@@ -23,8 +24,6 @@ import {
   type ImportStatus,
   type ImportSourcePhase,
 } from '@/services/import-session';
-
-declare const XLSX: any;
 
 type UiPhase = 'idle' | ImportStatus;
 
@@ -135,15 +134,6 @@ export default function ImportPage() {
   const [overallStatus, setOverallStatus] = useState<UiPhase>('idle');
   const [phases, setPhases] = useState<PhaseSummary[]>([]);
   const [progress, setProgress] = useState<ProgressInfo | null>(null);
-  const [xlsxLoaded, setXlsxLoaded] = useState(false);
-
-  const loadXLSX = useCallback(async () => {
-    if (xlsxLoaded) return;
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-    script.onload = () => setXlsxLoaded(true);
-    document.head.appendChild(script);
-  }, [xlsxLoaded]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -152,7 +142,6 @@ export default function ImportPage() {
       setPhases([]);
       setProgress(null);
       setOverallStatus('idle');
-      loadXLSX();
     }
   };
 
@@ -194,11 +183,6 @@ export default function ImportPage() {
 
   const handleImport = async () => {
     if (!file || !profile) return;
-
-    if (!xlsxLoaded) {
-      showToast('جاري تحميل مكتبة Excel...', 'error');
-      return;
-    }
 
     setImporting(true);
     setPhases([]);
@@ -354,12 +338,6 @@ export default function ImportPage() {
   };
 
   const downloadTemplate = () => {
-    if (!xlsxLoaded) {
-      loadXLSX();
-      showToast('جاري تحميل مكتبة Excel — حاول مرة أخرى', 'error');
-      return;
-    }
-
     const wb = XLSX.utils.book_new();
 
     const contractsData = [
