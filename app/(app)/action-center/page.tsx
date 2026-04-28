@@ -17,59 +17,66 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { getAuthHeaders } from '@/lib/supabase';
 import type { ActionItem, ActionPriority, ActionCategory } from '@/lib/action-center-service';
-import { getWorkflowActions, getBusinessActions, type ClaimAction } from '@/lib/action-engine';
+import { getWorkflowActions, getBusinessActions } from '@/lib/action-engine';
+import FilterBar, { type FilterItem } from '@/components/ui/FilterBar';
+import EmptyState from '@/components/ui/EmptyState';
+import AlertCard from '@/components/ui/AlertCard';
+import {
+  ShieldAlert, AlertTriangle, AlertCircle, CheckCircle2,
+  Clock, DollarSign, GitMerge, Paperclip, Scale,
+  RotateCcw, User as UserIcon, BarChart3, Search,
+  Lightbulb, FileText, Wrench, RefreshCw, Settings, ListChecks,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 // ─── Display configuration ────────────────────────────────────────
 
-const PRIORITY_CFG: Record<ActionPriority, {
-  label: string; color: string; bg: string; border: string;
-  sectionTitle: string; icon: string; sectionSubtitle: string;
-}> = {
+interface PriorityCfg {
+  label: string;
+  color: string;
+  bg: string;
+  border: string;
+  icon: LucideIcon;
+  sectionTitle: string;
+  sectionSubtitle: string;
+}
+
+const PRIORITY_CFG: Record<ActionPriority, PriorityCfg> = {
   CRITICAL: {
-    label:          'حرج',
-    color:          '#DC2626',
-    bg:             '#FEF2F2',
-    border:         '#FCA5A5',
-    icon:           '🔴',
-    sectionTitle:   'إجراءات فورية',
+    label: 'حرج', color: '#DC2626', bg: '#FEF2F2', border: '#FCA5A5',
+    icon: ShieldAlert,
+    sectionTitle: 'إجراءات فورية',
     sectionSubtitle: 'هذه البنود تستدعي تدخلاً فورياً — لا يجوز تأجيلها',
   },
   HIGH: {
-    label:          'مرتفع',
-    color:          '#C05728',
-    bg:             '#FFF7F3',
-    border:         '#FDBA74',
-    icon:           '🟠',
-    sectionTitle:   'تستوجب الاهتمام',
+    label: 'مرتفع', color: '#C05728', bg: '#FFF7F3', border: '#FDBA74',
+    icon: AlertTriangle,
+    sectionTitle: 'تستوجب الاهتمام',
     sectionSubtitle: 'بنود مرتفعة الأولوية — يُنصح بمعالجتها خلال 24 ساعة',
   },
   MEDIUM: {
-    label:          'متوسط',
-    color:          '#B45309',
-    bg:             '#FFFBEB',
-    border:         '#FCD34D',
-    icon:           '🟡',
-    sectionTitle:   'توصيات وتحسينات',
+    label: 'متوسط', color: '#B45309', bg: '#FFFBEB', border: '#FCD34D',
+    icon: AlertCircle,
+    sectionTitle: 'توصيات وتحسينات',
     sectionSubtitle: 'فرص تحسين لا تستدعي تدخلاً عاجلاً',
   },
   LOW: {
-    label:          'منخفض',
-    color:          '#166534',
-    bg:             '#F0FDF4',
-    border:         '#86EFAC',
-    icon:           '🟢',
-    sectionTitle:   'ملاحظات',
+    label: 'منخفض', color: '#166534', bg: '#F0FDF4', border: '#86EFAC',
+    icon: CheckCircle2,
+    sectionTitle: 'ملاحظات',
     sectionSubtitle: 'بنود منخفضة المخاطر للمراجعة الدورية',
   },
 };
 
-const CATEGORY_CFG: Record<ActionCategory, { icon: string; label: string }> = {
-  sla:        { icon: '⏱',  label: 'مهلة SLA' },
-  financial:  { icon: '💰', label: 'مالي' },
-  workflow:   { icon: '🔄', label: 'سير عمل' },
-  documents:  { icon: '📎', label: 'مستندات' },
-  risk:       { icon: '⚠️', label: 'مخاطر' },
-  governance: { icon: '⚖️', label: 'حوكمة' },
+interface CategoryCfg { icon: LucideIcon; label: string }
+
+const CATEGORY_CFG: Record<ActionCategory, CategoryCfg> = {
+  sla:        { icon: Clock,       label: 'مهلة SLA' },
+  financial:  { icon: DollarSign,  label: 'مالي' },
+  workflow:   { icon: GitMerge,    label: 'سير عمل' },
+  documents:  { icon: Paperclip,   label: 'مستندات' },
+  risk:       { icon: AlertTriangle, label: 'مخاطر' },
+  governance: { icon: Scale,       label: 'حوكمة' },
 };
 
 const ENTITY_TYPE_LABELS: Record<ActionItem['entityType'], string> = {
@@ -92,16 +99,21 @@ type FilterTab =
 
 type SortMode = 'priority' | 'age_desc' | 'age_asc' | 'mine_first';
 
-const FILTER_TABS: { id: FilterTab; label: string; icon: string }[] = [
-  { id: 'all',            label: 'الكل',            icon: '📋' },
-  { id: 'critical',       label: 'حرج',             icon: '🔴' },
-  { id: 'high',           label: 'مرتفع',           icon: '🟠' },
-  { id: 'overdue',        label: 'متأخر',           icon: '⏰' },
-  { id: 'mine',           label: 'بانتظاري',        icon: '👤' },
-  { id: 'claims',         label: 'مطالبات',         icon: '📄' },
-  { id: 'contracts',      label: 'عقود',            icon: '📋' },
-  { id: 'change_orders',  label: 'أوامر التغيير',  icon: '🔧' },
-];
+const FILTER_ICON: Record<FilterTab, LucideIcon> = {
+  all:            ListChecks,
+  critical:       ShieldAlert,
+  high:           AlertTriangle,
+  overdue:        Clock,
+  mine:           UserIcon,
+  claims:         FileText,
+  contracts:      FileText,
+  change_orders:  Wrench,
+};
+
+const FILTER_TAB_LABEL: Record<FilterTab, string> = {
+  all: 'الكل', critical: 'حرج', high: 'مرتفع', overdue: 'متأخر',
+  mine: 'بانتظاري', claims: 'مطالبات', contracts: 'عقود', change_orders: 'أوامر التغيير',
+};
 
 // ─── Loading skeleton ─────────────────────────────────────────────
 
@@ -142,17 +154,16 @@ function LoadingState() {
 
 // ─── KPI Card ─────────────────────────────────────────────────────
 
-interface KpiCardProps {
+interface AcKpiCardProps {
   label:       string;
   value:       number;
-  icon:        string;
+  icon:        LucideIcon;
   accentColor: string;
-  bgColor:     string;
   isActive?:   boolean;
   onClick?:    () => void;
 }
 
-function KpiCard({ label, value, icon, accentColor, bgColor, isActive, onClick }: KpiCardProps) {
+function AcKpiCard({ label, value, icon: Icon, accentColor, isActive, onClick }: AcKpiCardProps) {
   return (
     <div
       className={`
@@ -169,7 +180,7 @@ function KpiCard({ label, value, icon, accentColor, bgColor, isActive, onClick }
       role={onClick ? 'button' : undefined}
     >
       <div className="flex items-center justify-between">
-        <span className="text-lg">{icon}</span>
+        <Icon size={18} strokeWidth={2.2} style={{ color: accentColor }} />
         {isActive && (
           <span
             className="text-[0.55rem] font-black px-1.5 py-0.5 rounded-full text-white"
@@ -179,7 +190,7 @@ function KpiCard({ label, value, icon, accentColor, bgColor, isActive, onClick }
           </span>
         )}
       </div>
-      <div className="text-2xl font-black leading-none" style={{ color: accentColor }}>
+      <div className="text-2xl font-black leading-none tabular-nums" style={{ color: accentColor }}>
         {value}
       </div>
       <div className="text-[0.65rem] font-bold text-gray-500 leading-tight">{label}</div>
@@ -198,6 +209,8 @@ function ActionCard({ item, onAction }: ActionCardProps) {
   const pcfg  = PRIORITY_CFG[item.priority];
   const ccfg  = CATEGORY_CFG[item.category];
   const etLabel = ENTITY_TYPE_LABELS[item.entityType];
+  const PIcon = pcfg.icon;
+  const CIcon = ccfg.icon;
 
   return (
     <div
@@ -210,7 +223,7 @@ function ActionCard({ item, onAction }: ActionCardProps) {
       <div className="p-4">
         {/* Top row: category icon + title + priority badge */}
         <div className="flex items-start gap-2.5 mb-2.5">
-          <span className="text-[1.1rem] leading-none mt-0.5 flex-shrink-0">{ccfg.icon}</span>
+          <CIcon size={18} strokeWidth={2.2} className="mt-0.5 flex-shrink-0" style={{ color: pcfg.color }} />
           <div className="flex-1 min-w-0">
             <p className="text-[0.8rem] font-black text-gray-800 leading-snug">{item.title}</p>
             <p className="text-[0.65rem] text-gray-400 mt-0.5 font-bold truncate">{item.entityRef}</p>
@@ -218,10 +231,11 @@ function ActionCard({ item, onAction }: ActionCardProps) {
           <div className="flex-shrink-0 flex flex-col items-end gap-1.5">
             {/* Priority badge */}
             <span
-              className="text-[0.6rem] font-black px-2 py-0.5 rounded-full whitespace-nowrap"
+              className="inline-flex items-center gap-1 text-[0.6rem] font-black px-2 py-0.5 rounded-full whitespace-nowrap"
               style={{ background: pcfg.bg, color: pcfg.color, border: `1px solid ${pcfg.border}` }}
             >
-              {pcfg.icon} {pcfg.label}
+              <PIcon size={11} strokeWidth={2.4} />
+              {pcfg.label}
             </span>
             {/* Risk score mini bar */}
             <div className="flex items-center gap-1.5">
@@ -241,10 +255,11 @@ function ActionCard({ item, onAction }: ActionCardProps) {
 
         {/* Recommendation box */}
         <div
-          className="rounded-lg px-3 py-2 mb-3 text-[0.7rem] leading-relaxed font-bold"
+          className="rounded-lg px-3 py-2 mb-3 text-[0.7rem] leading-relaxed font-bold flex items-start gap-2"
           style={{ background: pcfg.bg, color: pcfg.color, borderRight: `3px solid ${pcfg.color}` }}
         >
-          💡 {item.recommendation}
+          <Lightbulb size={13} strokeWidth={2.2} className="flex-shrink-0 mt-0.5" />
+          <span>{item.recommendation}</span>
         </div>
 
         {/* Meta badges row */}
@@ -254,40 +269,46 @@ function ActionCard({ item, onAction }: ActionCardProps) {
             {etLabel}
           </span>
           {/* Category */}
-          <span className="inline-flex items-center gap-0.5 text-[0.6rem] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
-            {ccfg.icon} {ccfg.label}
+          <span className="inline-flex items-center gap-1 text-[0.6rem] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
+            <CIcon size={10} strokeWidth={2.2} />
+            {ccfg.label}
           </span>
           {/* Age */}
           {item.ageInDays > 0 && (
-            <span className="inline-flex items-center gap-0.5 text-[0.6rem] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
-              ⏰ {String(item.metadata.ageLabel ?? `${item.ageInDays} يوم`)}
+            <span className="inline-flex items-center gap-1 text-[0.6rem] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
+              <Clock size={10} strokeWidth={2.2} />
+              {String(item.metadata.ageLabel ?? `${item.ageInDays} يوم`)}
             </span>
           )}
           {/* Overdue badge */}
           {item.isOverdue && (
-            <span className="inline-flex items-center gap-0.5 text-[0.6rem] font-black px-1.5 py-0.5 rounded text-white" style={{ background: '#DC2626' }}>
-              ⚠️ متأخر
+            <span className="inline-flex items-center gap-1 text-[0.6rem] font-black px-1.5 py-0.5 rounded text-white" style={{ background: '#DC2626' }}>
+              <AlertTriangle size={10} strokeWidth={2.4} />
+              متأخر
             </span>
           )}
           {/* Assigned to me */}
           {item.assignedToMe && (
             <span
-              className="inline-flex items-center gap-0.5 text-[0.6rem] font-black px-1.5 py-0.5 rounded"
+              className="inline-flex items-center gap-1 text-[0.6rem] font-black px-1.5 py-0.5 rounded"
               style={{ background: '#E8F4F4', color: '#045859', border: '1px solid #045859' }}
             >
-              👤 بانتظارك
+              <UserIcon size={10} strokeWidth={2.4} />
+              بانتظارك
             </span>
           )}
           {/* Utilization pct if present */}
           {item.metadata.utilizationPct !== undefined && (
-            <span className="inline-flex items-center gap-0.5 text-[0.6rem] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
-              📊 {String(item.metadata.utilizationPct)}٪ استخدام
+            <span className="inline-flex items-center gap-1 text-[0.6rem] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
+              <BarChart3 size={10} strokeWidth={2.2} />
+              {String(item.metadata.utilizationPct)}٪ استخدام
             </span>
           )}
           {/* Return count if present */}
           {item.metadata.returnCnt !== undefined && Number(item.metadata.returnCnt) > 0 && (
-            <span className="inline-flex items-center gap-0.5 text-[0.6rem] font-bold px-1.5 py-0.5 rounded" style={{ background: '#FAEEE8', color: '#C05728' }}>
-              🔄 إرجاع ×{String(item.metadata.returnCnt)}
+            <span className="inline-flex items-center gap-1 text-[0.6rem] font-bold px-1.5 py-0.5 rounded" style={{ background: '#FAEEE8', color: '#C05728' }}>
+              <RotateCcw size={10} strokeWidth={2.4} />
+              إرجاع ×{String(item.metadata.returnCnt)}
             </span>
           )}
         </div>
@@ -361,19 +382,21 @@ function ActionCard({ item, onAction }: ActionCardProps) {
         {(item.sla || item.currentOwner) && (
           <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-gray-50">
             {item.currentOwner && (
-              <span className="text-[0.6rem] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
-                👤 المسؤول: {item.currentOwner}
+              <span className="inline-flex items-center gap-1 text-[0.6rem] font-bold text-gray-500 bg-gray-50 border border-gray-100 px-1.5 py-0.5 rounded">
+                <UserIcon size={10} strokeWidth={2.2} />
+                المسؤول: {item.currentOwner}
               </span>
             )}
             {item.sla && (
               <span
-                className="text-[0.6rem] font-black px-1.5 py-0.5 rounded"
+                className="inline-flex items-center gap-1 text-[0.6rem] font-black px-1.5 py-0.5 rounded"
                 style={{
                   background: item.sla.level === 'overdue' ? '#FEF2F2' : item.sla.level === 'warning' ? '#FFFBEB' : '#F0FDF4',
                   color: item.sla.level === 'overdue' ? '#DC2626' : item.sla.level === 'warning' ? '#B45309' : '#166534',
                 }}
               >
-                ⏱ {item.sla.daysElapsed}/{item.sla.config.limitDays} يوم ({item.sla.slaPct}٪)
+                <Clock size={10} strokeWidth={2.4} />
+                {item.sla.daysElapsed}/{item.sla.config.limitDays} يوم ({item.sla.slaPct}٪)
               </span>
             )}
           </div>
@@ -390,14 +413,15 @@ function SectionHeader({
   count,
 }: { priority: ActionPriority; count: number }) {
   const cfg = PRIORITY_CFG[priority];
+  const Ic = cfg.icon;
   return (
     <div className="flex items-center gap-3 mb-4">
-      <span className="text-xl leading-none">{cfg.icon}</span>
+      <Ic size={20} strokeWidth={2.2} style={{ color: cfg.color }} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <h2 className="text-[0.95rem] font-black text-gray-800">{cfg.sectionTitle}</h2>
           <span
-            className="text-[0.65rem] font-black px-2 py-0.5 rounded-full text-white flex-shrink-0"
+            className="text-[0.65rem] font-black px-2 py-0.5 rounded-full text-white flex-shrink-0 tabular-nums"
             style={{ background: cfg.color }}
           >
             {count} {count === 1 ? 'بند' : 'بنود'}
@@ -415,7 +439,7 @@ function SectionHeader({
 function EmptySection({ message }: { message: string }) {
   return (
     <div className="flex items-center gap-2 px-4 py-3 bg-gray-50 rounded-xl border border-gray-100 mb-4">
-      <span className="text-gray-300">✓</span>
+      <CheckCircle2 size={14} className="text-gray-300" strokeWidth={2.2} />
       <span className="text-[0.72rem] text-gray-400 font-bold">{message}</span>
     </div>
   );
@@ -438,6 +462,8 @@ function CardsGrid({ items, onAction }: { items: ActionItem[]; onAction: (url: s
 function ListRow({ item, onAction }: { item: ActionItem; onAction: (url: string) => void }) {
   const pcfg = PRIORITY_CFG[item.priority];
   const ccfg = CATEGORY_CFG[item.category];
+  const PIcon = pcfg.icon;
+  const CIcon = ccfg.icon;
 
   return (
     <div
@@ -449,7 +475,7 @@ function ListRow({ item, onAction }: { item: ActionItem; onAction: (url: string)
 
       <div className="flex-1 px-3 py-2.5 flex flex-wrap items-center gap-2">
         {/* Category icon */}
-        <span className="text-base flex-shrink-0">{ccfg.icon}</span>
+        <CIcon size={16} strokeWidth={2.2} className="flex-shrink-0" style={{ color: pcfg.color }} />
 
         {/* Title + ref */}
         <div className="flex-1 min-w-0">
@@ -460,10 +486,11 @@ function ListRow({ item, onAction }: { item: ActionItem; onAction: (url: string)
         {/* Badges */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <span
-            className="text-[0.58rem] font-black px-2 py-0.5 rounded-full"
+            className="inline-flex items-center gap-1 text-[0.58rem] font-black px-2 py-0.5 rounded-full"
             style={{ background: pcfg.bg, color: pcfg.color, border: `1px solid ${pcfg.border}` }}
           >
-            {pcfg.icon} {pcfg.label}
+            <PIcon size={9} strokeWidth={2.4} />
+            {pcfg.label}
           </span>
           {item.isOverdue && (
             <span className="text-[0.58rem] font-black text-white px-1.5 py-0.5 rounded" style={{ background: '#DC2626' }}>
@@ -471,8 +498,9 @@ function ListRow({ item, onAction }: { item: ActionItem; onAction: (url: string)
             </span>
           )}
           {item.assignedToMe && (
-            <span className="text-[0.58rem] font-black px-1.5 py-0.5 rounded" style={{ background: '#E8F4F4', color: '#045859' }}>
-              👤 بانتظارك
+            <span className="inline-flex items-center gap-1 text-[0.58rem] font-black px-1.5 py-0.5 rounded" style={{ background: '#E8F4F4', color: '#045859' }}>
+              <UserIcon size={9} strokeWidth={2.4} />
+              بانتظارك
             </span>
           )}
           {item.ageInDays > 0 && (
@@ -623,16 +651,20 @@ export default function ActionCenterPage() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 gap-3" dir="rtl">
-        <span className="text-4xl">⚠️</span>
-        <p className="text-sm text-red-500 font-bold">{error}</p>
-        <button
-          onClick={load}
-          className="text-sm text-white font-bold px-4 py-2 rounded-lg"
-          style={{ background: '#045859' }}
-        >
-          إعادة المحاولة
-        </button>
+      <div className="py-12" dir="rtl">
+        <AlertCard
+          level="danger"
+          title={error}
+          action={
+            <button
+              onClick={load}
+              className="text-sm text-white font-bold px-4 py-2 rounded-lg"
+              style={{ background: '#045859' }}
+            >
+              إعادة المحاولة
+            </button>
+          }
+        />
       </div>
     );
   }
@@ -670,7 +702,8 @@ export default function ActionCenterPage() {
               className="flex items-center gap-1.5 text-[0.72rem] font-black text-white px-3 py-1.5 rounded-lg transition-all hover:-translate-y-px disabled:opacity-50"
               style={{ background: 'linear-gradient(135deg, #502C7C 0%, #7B4DB5 100%)' }}
             >
-              {runningAuto ? '⚙️ جاري...' : '⚙️ تشغيل الأتمتة'}
+              <Settings size={12} strokeWidth={2.4} />
+              {runningAuto ? 'جاري...' : 'تشغيل الأتمتة'}
             </button>
           )}
           <button
@@ -678,7 +711,7 @@ export default function ActionCenterPage() {
             disabled={loading}
             className="flex items-center gap-1 text-[0.72rem] font-bold text-teal hover:text-teal-dark transition-colors disabled:opacity-40"
           >
-            <span className={loading ? 'animate-spin' : ''}>↻</span>
+            <RefreshCw size={12} strokeWidth={2.4} className={loading ? 'animate-spin' : ''} />
             <span>تحديث</span>
           </button>
         </div>
@@ -686,131 +719,111 @@ export default function ActionCenterPage() {
 
       {/* ── KPI Strip ──────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-        <KpiCard
+        <AcKpiCard
           label="إجراءات حرجة"
           value={summary.totalCritical}
-          icon="🔴"
+          icon={ShieldAlert}
           accentColor="#DC2626"
-          bgColor="#FEF2F2"
           isActive={activeFilter === 'critical'}
           onClick={() => setActiveFilter(f => f === 'critical' ? 'all' : 'critical')}
         />
-        <KpiCard
+        <AcKpiCard
           label="أولوية مرتفعة"
           value={summary.totalHigh}
-          icon="🟠"
+          icon={AlertTriangle}
           accentColor="#C05728"
-          bgColor="#FFF7F3"
           isActive={activeFilter === 'high'}
           onClick={() => setActiveFilter(f => f === 'high' ? 'all' : 'high')}
         />
-        <KpiCard
+        <AcKpiCard
           label="بنود متأخرة"
           value={summary.totalOverdue}
-          icon="⏰"
+          icon={Clock}
           accentColor="#B45309"
-          bgColor="#FFFBEB"
           isActive={activeFilter === 'overdue'}
           onClick={() => setActiveFilter(f => f === 'overdue' ? 'all' : 'overdue')}
         />
-        <KpiCard
+        <AcKpiCard
           label="بانتظار إجراءك"
           value={summary.totalMine}
-          icon="👤"
+          icon={UserIcon}
           accentColor="#045859"
-          bgColor="#E8F4F4"
           isActive={activeFilter === 'mine'}
           onClick={() => setActiveFilter(f => f === 'mine' ? 'all' : 'mine')}
         />
-        <KpiCard
+        <AcKpiCard
           label="توصيات"
           value={summary.totalMedium + summary.totalLow}
-          icon="💡"
+          icon={Lightbulb}
           accentColor="#87BA26"
-          bgColor="#F0F7E0"
           isActive={false}
         />
-        <KpiCard
+        <AcKpiCard
           label="إجمالي البنود"
           value={totalItems}
-          icon="📋"
+          icon={ListChecks}
           accentColor="#54565B"
-          bgColor="#F7F8FA"
-          isActive={activeFilter === 'all' && activeFilter === 'all'}
+          isActive={activeFilter === 'all'}
           onClick={() => setActiveFilter('all')}
         />
       </div>
 
       {/* ── Empty / Healthy state ────────────────────────────────── */}
       {totalItems === 0 && !loading && (
-        <div
-          className="flex flex-col items-center justify-center py-20 gap-4 rounded-2xl"
-          style={{ background: 'linear-gradient(135deg, #F0FDF4 0%, #E8F4F4 100%)', border: '1px solid #86EFAC' }}
-        >
-          <span className="text-5xl">✅</span>
-          <div className="text-center">
-            <p className="text-lg font-black text-[#045859]">المنصة بخير</p>
-            <p className="text-sm text-gray-500 mt-1">لا توجد بنود تستدعي تدخلاً حالياً</p>
-          </div>
-        </div>
+        <EmptyState
+          size="lg"
+          icon={CheckCircle2}
+          title="المنصة بخير"
+          description="لا توجد بنود تستدعي تدخلاً حالياً"
+        />
       )}
 
       {totalItems > 0 && (
         <>
           {/* ── Filter + Sort Bar ───────────────────────────────── */}
-          <div className="flex flex-wrap items-center justify-between gap-2 bg-white rounded-xl border border-gray-100 px-3 py-2.5">
-            {/* Filter tabs */}
-            <div className="flex items-center gap-1 flex-wrap">
-              {FILTER_TABS.map(tab => {
-                const count = tab.id === 'all'            ? totalItems
-                  : tab.id === 'critical'       ? summary.totalCritical
-                  : tab.id === 'high'           ? summary.totalHigh
-                  : tab.id === 'overdue'        ? summary.totalOverdue
-                  : tab.id === 'mine'           ? summary.totalMine
-                  : tab.id === 'claims'         ? items.filter(i => i.entityType === 'claim').length
-                  : tab.id === 'contracts'      ? items.filter(i => i.entityType === 'contract').length
-                  : tab.id === 'change_orders'  ? items.filter(i => i.entityType === 'change_order').length
-                  : 0;
-
-                const isActive = activeFilter === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveFilter(tab.id)}
-                    className={`
-                      flex items-center gap-1 text-[0.68rem] font-bold px-2.5 py-1 rounded-lg transition-all
-                      ${isActive
-                        ? 'text-white'
-                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}
-                    `}
-                    style={isActive ? { background: '#045859' } : {}}
-                  >
-                    <span>{tab.icon}</span>
-                    <span>{tab.label}</span>
-                    {count > 0 && (
-                      <span
-                        className={`text-[0.55rem] font-black px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/30 text-white' : 'bg-gray-100 text-gray-600'}`}
-                      >
-                        {count}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Sort dropdown */}
-            <select
-              value={sortMode}
-              onChange={e => setSortMode(e.target.value as SortMode)}
-              className="text-[0.68rem] font-bold text-gray-600 border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-teal/40 font-sans"
-            >
-              <option value="priority">ترتيب: الأولوية</option>
-              <option value="age_desc">ترتيب: الأقدم أولاً</option>
-              <option value="age_asc">ترتيب: الأحدث أولاً</option>
-              <option value="mine_first">ترتيب: المخصص لي أولاً</option>
-            </select>
-          </div>
+          {(() => {
+            const filterCount = (id: FilterTab): number =>
+              id === 'all'            ? totalItems
+            : id === 'critical'       ? summary.totalCritical
+            : id === 'high'           ? summary.totalHigh
+            : id === 'overdue'        ? summary.totalOverdue
+            : id === 'mine'           ? summary.totalMine
+            : id === 'claims'         ? items.filter(i => i.entityType === 'claim').length
+            : id === 'contracts'      ? items.filter(i => i.entityType === 'contract').length
+            : id === 'change_orders'  ? items.filter(i => i.entityType === 'change_order').length
+            : 0;
+            const filterItems: FilterItem<FilterTab>[] = (
+              ['all','critical','high','overdue','mine','claims','contracts','change_orders'] as FilterTab[]
+            ).map(id => {
+              const Ic = FILTER_ICON[id];
+              return {
+                value: id,
+                label: FILTER_TAB_LABEL[id],
+                count: filterCount(id),
+                icon: <Ic size={11} strokeWidth={2.4} />,
+              };
+            });
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-white rounded-xl border border-gray-100 px-3 py-2.5">
+                <FilterBar<FilterTab>
+                  size="sm"
+                  items={filterItems}
+                  value={activeFilter}
+                  onChange={setActiveFilter}
+                />
+                <select
+                  value={sortMode}
+                  onChange={e => setSortMode(e.target.value as SortMode)}
+                  className="text-[0.68rem] font-bold text-gray-600 border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-teal/40 font-sans"
+                >
+                  <option value="priority">ترتيب: الأولوية</option>
+                  <option value="age_desc">ترتيب: الأقدم أولاً</option>
+                  <option value="age_asc">ترتيب: الأحدث أولاً</option>
+                  <option value="mine_first">ترتيب: المخصص لي أولاً</option>
+                </select>
+              </div>
+            );
+          })()}
 
           {/* ── Content ─────────────────────────────────────────── */}
 
@@ -849,16 +862,19 @@ export default function ActionCenterPage() {
             /* Flat filtered list */
             <div className="space-y-2">
               {displayItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-3">
-                  <span className="text-4xl">🔍</span>
-                  <p className="text-sm text-gray-400 font-bold">لا توجد بنود تطابق الفلتر المحدد</p>
-                  <button
-                    onClick={() => setActiveFilter('all')}
-                    className="text-sm font-bold text-teal underline"
-                  >
-                    عرض الكل
-                  </button>
-                </div>
+                <EmptyState
+                  size="md"
+                  icon={Search}
+                  title="لا توجد بنود تطابق الفلتر المحدد"
+                  action={
+                    <button
+                      onClick={() => setActiveFilter('all')}
+                      className="text-sm font-bold text-teal underline"
+                    >
+                      عرض الكل
+                    </button>
+                  }
+                />
               ) : (
                 <>
                   <div className="flex items-center justify-between mb-2">

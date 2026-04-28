@@ -17,6 +17,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import PageHeader from '@/components/ui/PageHeader';
+import DecisionHub from '@/components/dashboard/DecisionHub';
 import { createBrowserSupabase } from '@/lib/supabase';
 
 import {
@@ -304,11 +305,14 @@ export default function ExecutiveDashboardPage() {
         </div>
       </div>
 
+      {/* ── Decision Hub — top-of-page executive summary ────────── */}
+      <DecisionHub />
+
       {/* System Health Banner */}
       <SystemHealthBanner health={bottlenecks.systemHealth} label={bottlenecks.systemHealth_ar} alertCount={alertSummary.criticalCount} />
 
-      {/* Section 1: Overall Performance KPIs */}
-      <OverallPerformanceSection overall={overall} />
+      {/* Section 1: Overall Performance KPIs are now surfaced inside DecisionHub above; */}
+      {/* the legacy 8-up KPI strip is intentionally removed to eliminate duplication. */}
 
       {/* Section 2: Stage Performance Table */}
       <StagePerformanceSection stagePerf={stagePerf} />

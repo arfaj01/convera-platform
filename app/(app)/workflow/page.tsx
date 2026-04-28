@@ -19,6 +19,8 @@ import Card, { CardBody } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
+import FilterBar from '@/components/ui/FilterBar';
+import EmptyState from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchPendingClaims, performClaimAction } from '@/services/workflow';
@@ -33,6 +35,14 @@ import {
   type ClaimAction,
   type ActionContext,
 } from '@/lib/action-engine';
+import { assessClaimSLA, type SLAAssessment } from '@/lib/sla-escalation';
+import {
+  Send, Eye, FileSearch, ShieldCheck, BadgeCheck,
+  RotateCcw, X as XIcon, CheckCircle2,
+  Clock, AlertTriangle, ArrowRight, Crown, User as UserIcon,
+  ShieldOff,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 // ─── ContractRole → Pending Statuses ─────────────────────────────
 const CONTRACT_ROLE_STATUSES: Partial<Record<ContractRole, ClaimStatus[]>> = {
@@ -63,16 +73,18 @@ const NEXT_STAGE: Partial<Record<ClaimStatus, ClaimStatus>> = {
   pending_director_approval:  'approved',
 };
 
-const STAGE_INFO: Partial<Record<ClaimStatus, { label: string; color: string; icon: string }>> = {
-  submitted:                 { label: 'مُقدَّم (توجيه تلقائي)',         color: '#FFC845', icon: '📩' },
-  under_supervisor_review:   { label: 'قيد مراجعة جهة الإشراف',       color: '#00A79D', icon: '🔍' },
-  returned_by_supervisor:    { label: 'مُرجَع من جهة الإشراف',         color: '#C05728', icon: '↩️' },
-  under_auditor_review:      { label: 'قيد مراجعة المدقق',             color: '#502C7C', icon: '🔎' },
-  returned_by_auditor:       { label: 'مُرجَع من المدقق',               color: '#C05728', icon: '↩️' },
-  under_reviewer_check:      { label: 'قيد فحص المراجع',               color: '#C05728', icon: '📋' },
-  pending_director_approval: { label: 'بانتظار اعتماد المدير',          color: '#045859', icon: '✍️' },
-  approved:                  { label: 'معتمد',                          color: '#87BA26', icon: '✅' },
-  rejected:                  { label: 'مرفوض',                          color: '#C05728', icon: '❌' },
+interface StageInfo { label: string; color: string; icon: LucideIcon }
+
+const STAGE_INFO: Partial<Record<ClaimStatus, StageInfo>> = {
+  submitted:                 { label: 'مُقدَّم (توجيه تلقائي)',         color: '#FFC845', icon: Send },
+  under_supervisor_review:   { label: 'قيد مراجعة جهة الإشراف',       color: '#00A79D', icon: Eye },
+  returned_by_supervisor:    { label: 'مُرجَع من جهة الإشراف',         color: '#C05728', icon: RotateCcw },
+  under_auditor_review:      { label: 'قيد مراجعة المدقق',             color: '#502C7C', icon: FileSearch },
+  returned_by_auditor:       { label: 'مُرجَع من المدقق',               color: '#C05728', icon: RotateCcw },
+  under_reviewer_check:      { label: 'قيد فحص المراجع',               color: '#C05728', icon: ShieldCheck },
+  pending_director_approval: { label: 'بانتظار اعتماد المدير',          color: '#045859', icon: BadgeCheck },
+  approved:                  { label: 'معتمد',                          color: '#87BA26', icon: CheckCircle2 },
+  rejected:                  { label: 'مرفوض',                          color: '#C05728', icon: XIcon },
 };
 
 const STAGE_LABELS: Partial<Record<ClaimStatus, string>> = {
@@ -81,14 +93,6 @@ const STAGE_LABELS: Partial<Record<ClaimStatus, string>> = {
   under_reviewer_check:      'قيد فحص المراجع',
   pending_director_approval: 'بانتظار اعتماد المدير',
 };
-
-// ─── SLA Helper ──────────────────────────────────────────────────
-function calcSLA(submittedAt: string | null): { days: number; isWarning: boolean; isBreach: boolean } | null {
-  if (!submittedAt) return null;
-  const ms = Date.now() - new Date(submittedAt).getTime();
-  const days = ms / (1000 * 60 * 60 * 24);
-  return { days: Math.floor(days), isWarning: days >= 2, isBreach: days >= 3 };
-}
 
 // ─── Types ───────────────────────────────────────────────────────
 interface PendingClaim {
@@ -178,7 +182,7 @@ function InlineActions({
               disabled={loading || !action.enabled}
               className="text-xs py-1.5 px-3"
             >
-              {loading ? '⏳' : action.label_ar}
+              {loading ? '...' : action.label_ar}
             </Button>
             {!action.enabled && action.reason_if_disabled && (
               <div className="absolute bottom-full mb-1 right-0 hidden group-hover:block z-50 w-56 p-2 bg-gray-800 text-white text-[0.65rem] rounded shadow-lg leading-relaxed">
@@ -195,7 +199,7 @@ function InlineActions({
             onClick={e => { e.stopPropagation(); setModalAction(directorOverride); }}
             className="text-xs py-1.5 px-3 border-[#502C7C] text-[#502C7C] hover:bg-[#502C7C]/10"
           >
-            🔀 {directorOverride.label_ar}
+            {directorOverride.label_ar}
           </Button>
         )}
       </div>
@@ -213,7 +217,7 @@ function InlineActions({
               onClick={() => modalAction && execute(modalAction, reason)}
               disabled={loading || reason.length < minLen}
             >
-              {loading ? '⏳ جاري التنفيذ...' : 'تأكيد'}
+              {loading ? 'جاري التنفيذ...' : 'تأكيد'}
             </Button>
           </>
         }
@@ -281,10 +285,14 @@ function DirectorOverrideContent({
 
   return (
     <div className="space-y-4">
-      <div className="p-3 bg-gray-50 rounded border border-gray-100 text-xs">
-        <span className="text-gray-500">المرحلة الحالية: </span>
+      <div className="p-3 bg-gray-50 rounded border border-gray-100 text-xs flex items-center gap-2">
+        <span className="text-gray-500">المرحلة الحالية:</span>
+        {(() => {
+          const Ic = STAGE_INFO[claim.status]?.icon;
+          return Ic ? <Ic size={12} className="text-[#045859]" strokeWidth={2.2} /> : null;
+        })()}
         <span className="font-bold text-teal-dark">
-          {STAGE_INFO[claim.status]?.icon} {CLAIM_STATUS_LABELS[claim.status] || claim.status}
+          {CLAIM_STATUS_LABELS[claim.status] || claim.status}
         </span>
       </div>
 
@@ -293,7 +301,9 @@ function DirectorOverrideContent({
           إحالة المطالبة إلى المرحلة:
         </label>
         <div className="space-y-2">
-          {availableStages.map(s => (
+          {availableStages.map(s => {
+            const Ic = STAGE_INFO[s]?.icon;
+            return (
             <label
               key={s}
               onClick={e => e.stopPropagation()}
@@ -311,11 +321,13 @@ function DirectorOverrideContent({
                 onChange={() => setTargetStatus(s)}
                 className="accent-teal"
               />
-              <div className="text-xs font-bold text-gray-800">
-                {STAGE_INFO[s]?.icon} {STAGE_LABELS[s] || CLAIM_STATUS_LABELS[s] || s}
+              <div className="text-xs font-bold text-gray-800 flex items-center gap-2">
+                {Ic && <Ic size={12} className="text-[#045859]" strokeWidth={2.2} />}
+                {STAGE_LABELS[s] || CLAIM_STATUS_LABELS[s] || s}
               </div>
             </label>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -335,8 +347,9 @@ function DirectorOverrideContent({
         )}
       </div>
 
-      <div className="p-2.5 bg-[#FFF8E0] border border-[#FFC845]/40 rounded text-xs text-[#7A4F00]">
-        ⚠ هذا الإجراء يُسجَّل في سجل التدقيق ويُحال المستخلص مباشرةً إلى المرحلة المختارة.
+      <div className="p-2.5 bg-[#FFF8E0] border border-[#FFC845]/40 rounded text-xs text-[#7A4F00] flex items-start gap-2">
+        <AlertTriangle size={14} strokeWidth={2.2} className="flex-shrink-0 mt-0.5" />
+        <span>هذا الإجراء يُسجَّل في سجل التدقيق ويُحال المستخلص مباشرةً إلى المرحلة المختارة.</span>
       </div>
 
       <Button
@@ -365,40 +378,50 @@ function ClaimCard({
 }) {
   const router = useRouter();
   const contract = claim.contracts;
-  const sla = claim.status === 'under_supervisor_review' ? calcSLA(claim.submitted_at) : null;
+  // SLA assessment via the canonical engine (Saudi work-day aware).
+  const sla: SLAAssessment | null = assessClaimSLA(
+    { id: claim.id, claim_no: claim.claim_no, contract_id: claim.contract_id, status: claim.status },
+    claim.submitted_at,
+  );
   const stage = STAGE_INFO[claim.status];
+  const StageIcon = stage?.icon;
   const nextStage = NEXT_STAGE[claim.status];
   const nextStageInfo = nextStage ? STAGE_INFO[nextStage] : null;
+  const NextIcon = nextStageInfo?.icon;
 
   return (
     <Card className="hover:shadow-cardHover transition-all">
       <CardBody>
         {/* Stage pipeline strip */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">
-          {stage && (
+          {stage && StageIcon && (
             <span
               className="inline-flex items-center gap-1.5 text-[0.72rem] font-bold px-2 py-0.5 rounded-full"
               style={{ color: stage.color, background: `${stage.color}18` }}
             >
-              {stage.icon} {stage.label}
+              <StageIcon size={12} strokeWidth={2.4} />
+              {stage.label}
             </span>
           )}
-          {nextStageInfo && nextStage && (
+          {nextStageInfo && nextStage && NextIcon && (
             <>
-              <span className="text-gray-300 text-xs font-bold">←</span>
+              <ArrowRight size={12} className="text-gray-300" />
               <span className="inline-flex items-center gap-1.5 text-[0.70rem] font-bold px-2 py-0.5 rounded-full text-gray-500 bg-gray-100 border border-gray-200">
-                {nextStageInfo.icon} {STAGE_LABELS[nextStage] || CLAIM_STATUS_LABELS[nextStage] || nextStage}
+                <NextIcon size={12} strokeWidth={2.2} />
+                {STAGE_LABELS[nextStage] || CLAIM_STATUS_LABELS[nextStage] || nextStage}
               </span>
             </>
           )}
-          {sla?.isBreach && (
+          {sla?.level === 'overdue' && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.68rem] font-bold bg-[#FDECEA] text-red">
-              ⚠ تجاوز SLA
+              <AlertTriangle size={11} strokeWidth={2.4} />
+              تجاوز SLA · {sla.daysElapsed}/{sla.config.limitDays} يوم عمل
             </span>
           )}
-          {sla?.isWarning && !sla.isBreach && (
+          {sla?.level === 'warning' && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.68rem] font-bold bg-[#FFF8E0] text-[#C46A00]">
-              ⏰ تنبيه SLA
+              <Clock size={11} strokeWidth={2.4} />
+              تنبيه SLA · {sla.daysElapsed}/{sla.config.limitDays} يوم عمل
             </span>
           )}
         </div>
@@ -423,8 +446,8 @@ function ClaimCard({
               {sla && (
                 <>
                   <span>·</span>
-                  <span className={sla.isBreach ? 'text-red font-bold' : sla.isWarning ? 'text-[#C46A00] font-bold' : ''}>
-                    {sla.days} أيام في المراجعة
+                  <span className={sla.level === 'overdue' ? 'text-red font-bold' : sla.level === 'warning' ? 'text-[#C46A00] font-bold' : ''}>
+                    {sla.daysElapsed} أيام عمل في المراجعة
                   </span>
                 </>
               )}
@@ -583,20 +606,12 @@ export default function WorkflowPage() {
     return (
       <>
         <PageHeader title="سير الاعتماد" subtitle="غير متاح" />
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: '#E8F4F4' }}>
-            <svg className="w-8 h-8" style={{ color: '#045859' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-            </svg>
-          </div>
-          <h3 className="text-base font-bold mb-2" style={{ color: '#045859' }}>
-            لا توجد عقود مرتبطة بحسابك حالياً
-          </h3>
-          <p className="text-sm text-gray-500 max-w-sm leading-relaxed">
-            تم تقييد صلاحياتك التشغيلية — لا يمكن عرض طلبات الاعتماد بدون عقود مرتبطة.
-            تواصل مع مدير الإدارة لتفعيل الصلاحيات.
-          </p>
-        </div>
+        <EmptyState
+          size="lg"
+          icon={ShieldOff}
+          title="لا توجد عقود مرتبطة بحسابك حالياً"
+          description="تم تقييد صلاحياتك التشغيلية — لا يمكن عرض طلبات الاعتماد بدون عقود مرتبطة. تواصل مع مدير الإدارة لتفعيل الصلاحيات."
+        />
       </>
     );
   }
@@ -625,7 +640,7 @@ export default function WorkflowPage() {
               : 'bg-teal-pale border-teal/20 text-teal-dark'
           }`}
         >
-          <span>{isDirector ? '👑' : '👤'}</span>
+          {isDirector ? <Crown size={14} strokeWidth={2.4} /> : <UserIcon size={14} strokeWidth={2.4} />}
           <span>
             {isDirector
               ? 'عرض شامل — مدير الإدارة يرى جميع المستخلصات النشطة ويملك صلاحية تعديل الإحالة في أي مرحلة'
@@ -636,54 +651,51 @@ export default function WorkflowPage() {
       )}
 
       {claims.length === 0 ? (
-        <div className="text-center py-20">
-          <div className="text-5xl mb-4">✅</div>
-          <p className="text-base font-bold text-gray-600 mb-1">
-            {isDirector ? 'لا توجد مستخلصات نشطة في النظام' : 'لا توجد طلبات بانتظار الإجراء'}
-          </p>
-          <p className="text-sm text-gray-400">
-            {isDirector
-              ? 'جميع المستخلصات إما معتمدة أو مرفوضة أو مسودات'
-              : 'جميع الطلبات ضمن نطاق عملك تمت معالجتها'}
-          </p>
-        </div>
+        <EmptyState
+          size="lg"
+          icon={CheckCircle2}
+          title={isDirector ? 'لا توجد مستخلصات نشطة في النظام' : 'لا توجد طلبات بانتظار الإجراء'}
+          description={isDirector
+            ? 'جميع المستخلصات إما معتمدة أو مرفوضة أو مسودات'
+            : 'جميع الطلبات ضمن نطاق عملك تمت معالجتها'}
+        />
       ) : (
         <>
-          {/* Status filter tabs */}
+          {/* Status filter pills */}
           {statusesPresent.length > 1 && (
-            <div className="flex gap-2 mb-4 flex-wrap">
-              <button
-                onClick={() => setFilter('all')}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
-                  filter === 'all' ? 'bg-teal text-white' : 'bg-gray-100 text-gray-600 hover:bg-teal-pale'
-                }`}
-              >
-                الكل ({claims.length})
-              </button>
-              {statusesPresent.map(s => (
-                <button
-                  key={s}
-                  onClick={() => setFilter(s)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
-                    filter === s ? 'bg-teal text-white' : 'bg-gray-100 text-gray-600 hover:bg-teal-pale'
-                  }`}
-                >
-                  {STAGE_INFO[s]?.icon} {CLAIM_STATUS_LABELS[s]} ({claims.filter(c => c.status === s).length})
-                </button>
-              ))}
-            </div>
+            <FilterBar<ClaimStatus | 'all'>
+              className="mb-4"
+              value={filter}
+              onChange={setFilter}
+              items={[
+                { value: 'all', label: 'الكل', count: claims.length },
+                ...statusesPresent.map(s => ({
+                  value: s,
+                  label: CLAIM_STATUS_LABELS[s] ?? s,
+                  count: claims.filter(c => c.status === s).length,
+                })),
+              ]}
+            />
           )}
 
           {/* Grouped claim cards */}
           <div className="space-y-6">
-            {(Object.entries(grouped) as [ClaimStatus, PendingClaim[]][]).map(([status, group]) => (
+            {(Object.entries(grouped) as [ClaimStatus, PendingClaim[]][]).map(([status, group]) => {
+              const groupStage = STAGE_INFO[status];
+              const GroupIcon = groupStage?.icon ?? Send;
+              const nxt = NEXT_STAGE[status];
+              const NxtIcon = nxt ? STAGE_INFO[nxt]?.icon : null;
+              return (
               <div key={status}>
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-base">{STAGE_INFO[status]?.icon || '📄'}</span>
+                  <GroupIcon size={16} className="text-[#045859]" strokeWidth={2.2} />
                   <h3 className="text-sm font-bold text-teal-dark">{CLAIM_STATUS_LABELS[status]}</h3>
-                  {isDirector && NEXT_STAGE[status] && (
-                    <span className="text-[0.70rem] text-gray-400">
-                      ← المرحلة التالية: {STAGE_INFO[NEXT_STAGE[status]!]?.icon} {CLAIM_STATUS_LABELS[NEXT_STAGE[status]!]}
+                  {isDirector && nxt && (
+                    <span className="inline-flex items-center gap-1 text-[0.70rem] text-gray-400">
+                      <ArrowRight size={11} className="text-gray-300" />
+                      المرحلة التالية:
+                      {NxtIcon && <NxtIcon size={11} strokeWidth={2.2} />}
+                      {CLAIM_STATUS_LABELS[nxt]}
                     </span>
                   )}
                   <span className="ms-auto text-xs text-gray-400 font-bold">{group.length} طلب</span>
@@ -703,7 +715,8 @@ export default function WorkflowPage() {
                   ))}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Summary footer */}
