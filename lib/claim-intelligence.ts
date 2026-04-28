@@ -78,6 +78,7 @@ const STATUS_OWNER_MAP: Record<ClaimStatus, OwnerRole> = {
   pending_director_approval:  'director',
   approved:                   null,
   rejected:                   null,
+  cancelled:                  null,
 };
 
 // ─── Arabic Labels ───────────────────────────────────────────────
@@ -101,6 +102,7 @@ const STAGE_LABELS: Record<ClaimStatus, string> = {
   pending_director_approval:  'بانتظار اعتماد المدير',
   approved:                   'معتمدة',
   rejected:                   'مرفوضة',
+  cancelled:                  'ملغاة',
 };
 
 // ─── Core Functions ──────────────────────────────────────────────

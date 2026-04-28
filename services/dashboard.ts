@@ -118,6 +118,7 @@ const STATUS_META: Record<ClaimStatus, { label: string; color: string; order: nu
   pending_director_approval:  { label: 'بانتظار المدير',          color: '#045859', order: 8 },
   approved:                   { label: 'معتمدة',                   color: '#87BA26', order: 9 },
   rejected:                   { label: 'مرفوضة',                   color: '#DC2626', order: 10 },
+  cancelled:                  { label: 'ملغاة',                     color: '#6B7280', order: 11 },
 };
 
 const IN_FLIGHT_STATUSES: ClaimStatus[] = [

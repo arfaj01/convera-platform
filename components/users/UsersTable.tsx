@@ -24,6 +24,7 @@ const ROLE_BADGE: Record<UserRole, { bg: string; text: string }> = {
   // Legacy aliases
   auditor:    { bg: '#E0F4F3', text: '#00A79D' },
   supervisor: { bg: '#FFF8E0', text: '#B8860B' },
+  final_approver: { bg: '#E8F4F4', text: '#045859' },
 };
 
 // ── Props ─────────────────────────────────────────────────────────

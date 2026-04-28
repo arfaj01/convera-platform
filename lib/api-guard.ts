@@ -45,6 +45,7 @@ export interface AuthContext {
     role: UserRole;
     full_name_ar: string;
     full_name: string;
+    email: string;
   };
   /** Admin Supabase client (service role) — bypasses RLS for writes */
   admin: SupabaseClient;
@@ -233,6 +234,7 @@ export function withAuth(
           role: profile.role as UserRole,
           full_name_ar: profile.full_name_ar ?? '',
           full_name: profile.full_name ?? '',
+          email: user.email ?? '',
         },
         admin,
         ip,

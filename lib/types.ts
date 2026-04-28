@@ -1,7 +1,8 @@
 // ─── Database Enums ──────────────────────────────────────────────
 /**
  * User roles in CONVERA platform
- * - director: Final approval authority (مدير الإدارة)
+ * - director: Platform owner — Mohammed Al-Arfaj only (مدير الإدارة)
+ * - final_approver: Designated final approver per contract (المعتمد النهائي)
  * - admin: Internal auditor/system administrator (مدقق / مشرف النظام)
  * - reviewer: Governance/alignment reviewer (مراجع)
  * - consultant: External consulting firm representative (جهة الإشراف)
@@ -9,7 +10,7 @@
  * Legacy aliases kept for backward compatibility:
  * - auditor → admin, supervisor → consultant
  */
-export type UserRole = 'director' | 'admin' | 'reviewer' | 'consultant' | 'contractor' | 'auditor' | 'supervisor';
+export type UserRole = 'director' | 'admin' | 'reviewer' | 'consultant' | 'contractor' | 'auditor' | 'supervisor' | 'final_approver';
 
 /**
  * Contract-scoped roles (from user_contract_roles table — migration 025).
@@ -22,7 +23,7 @@ export type UserRole = 'director' | 'admin' | 'reviewer' | 'consultant' | 'contr
  *   reviewer    → reviewer
  *   director    → N/A (global, not contract-scoped)
  */
-export type ContractRole = 'contractor' | 'supervisor' | 'auditor' | 'reviewer' | 'viewer';
+export type ContractRole = 'contractor' | 'supervisor' | 'auditor' | 'reviewer' | 'viewer' | 'final_approver';
 
 /**
  * A user's role assignment on a specific contract.
@@ -470,6 +471,54 @@ export interface SLAStatus {
   isWarningTriggered: boolean;
   isBreached: boolean;
   breachDate: string | null;
+}
+
+// ─── Contract Approver Types (Migration 040) ───────────────────
+
+export type ApprovalScope = 'final_approver' | 'reviewer' | 'auditor';
+export type PermissionRequestStatus = 'pending' | 'approved' | 'rejected';
+
+/**
+ * A dynamic approver assignment on a specific contract.
+ * Represents a row from the contract_approvers table.
+ */
+export interface ContractApprover {
+  id: string;
+  contract_id: string;
+  user_id: string;
+  approval_scope: ApprovalScope;
+  granted_by: string | null;
+  granted_at: string;
+  revoked_at: string | null;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  profiles?: { full_name_ar: string | null; full_name: string; email: string };
+}
+
+/**
+ * A permission request submitted by ADMIN for Director approval.
+ * Represents a row from the permission_requests table.
+ */
+export interface PermissionRequest {
+  id: string;
+  requested_by: string;
+  target_user_id: string;
+  contract_id: string;
+  requested_scope: ApprovalScope;
+  status: PermissionRequestStatus;
+  approved_by: string | null;
+  approved_at: string | null;
+  rejection_reason: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  requester?: { full_name_ar: string | null; full_name: string };
+  target_user?: { full_name_ar: string | null; full_name: string; email: string };
+  contract?: { contract_no: string; title_ar: string | null };
 }
 
 // ─── Legacy / Amendment Types (for services/amendments.ts) ──────

@@ -9,12 +9,23 @@ interface BOQTableProps {
   items: BOQFormItem[];
   onChange: (results: BOQLineResult[], total: number, hasErrors?: boolean) => void;
   readonly?: boolean;
+  /**
+   * Pre-calculated prev_progress values from approved claims.
+   * Key = item_no (BOQFormItem.id), Value = cumulative previous progress.
+   * When provided, prev_progress fields become read-only (locked).
+   */
+  prevProgressValues?: Record<number, number>;
 }
 
-function BOQTableInner({ items, onChange, readonly = false }: BOQTableProps) {
+function BOQTableInner({ items, onChange, readonly = false, prevProgressValues }: BOQTableProps) {
+  const hasPrevProgress = prevProgressValues && Object.keys(prevProgressValues).length > 0;
+
   // prev = الكميات المنفذة (سابق), curr = الكميات الحالية (جاري)
   const [values, setValues] = useState<Record<number, { prev: number; curr: number }>>(
-    () => Object.fromEntries(items.map(it => [it.id, { prev: 0, curr: 0 }]))
+    () => Object.fromEntries(items.map(it => [
+      it.id,
+      { prev: prevProgressValues?.[it.id] ?? 0, curr: 0 },
+    ]))
   );
 
   // Validation errors per item
@@ -90,10 +101,19 @@ function BOQTableInner({ items, onChange, readonly = false }: BOQTableProps) {
                 <td className="px-2 py-1.5 text-[0.7rem] border-b border-gray-100 max-w-[180px] truncate">{it.name}</td>
                 <td className="px-2 py-1.5 text-[0.75rem] border-b border-gray-100 font-bold text-teal-dark tabular-nums">{fmt(it.price)}</td>
                 <td className="px-2 py-1.5 text-[0.75rem] border-b border-gray-100 text-center tabular-nums">{fmt(it.contractualQty)}</td>
-                {/* الكميات المنفذة (سابق) */}
+                {/* الكميات المنفذة (سابق) — locked when auto-calculated */}
                 <td className="px-2 py-1.5 border-b border-gray-100 text-center">
-                  {readonly ? (
-                    <span className="tabular-nums">{v.prev}</span>
+                  {readonly || hasPrevProgress ? (
+                    <div className="flex items-center justify-center gap-1">
+                      <span className="tabular-nums text-xs font-bold text-gray-700">{v.prev}</span>
+                      {hasPrevProgress && !readonly && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#045859" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="محسوب تلقائياً من المطالبات المعتمدة">
+                          <title>محسوب تلقائياً من المطالبات المعتمدة</title>
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                      )}
+                    </div>
                   ) : (
                     <input
                       type="number"

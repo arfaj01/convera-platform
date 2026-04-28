@@ -164,6 +164,7 @@ function contractRoleToWorkflowRole(contractRole: ContractRole): UserRole | null
     auditor: 'auditor',
     reviewer: 'reviewer',
     viewer: null,
+    final_approver: 'final_approver',
   };
   return map[contractRole] ?? null;
 }

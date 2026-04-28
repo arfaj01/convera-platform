@@ -163,6 +163,7 @@ function resolveWorkflowRole(ctx: ActionContext): UserRole {
       auditor:    'auditor',
       reviewer:   'reviewer',
       viewer:     ctx.globalRole, // viewer has no workflow actions
+      final_approver: 'final_approver',
     };
     return map[ctx.contractRole];
   }
@@ -584,6 +585,7 @@ export function buildActionContext(params: {
         auditor:    'auditor',
         reviewer:   'reviewer',
         viewer:     params.globalRole,
+        final_approver: 'final_approver',
       };
       isExpectedActor = roleMap[params.contractRole] === expectedRole;
     } else if (params.globalRole === expectedRole) {

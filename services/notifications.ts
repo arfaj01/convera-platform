@@ -212,6 +212,7 @@ export async function sendWorkflowNotification(
       returned_by_supervisor: 'claim_returned',
       returned_by_auditor: 'claim_returned',
       draft: 'claim_submitted',
+      cancelled: 'claim_rejected',
     };
 
     const notificationType = typeMap[toStatus] || 'claim_submitted';
@@ -229,6 +230,7 @@ export async function sendWorkflowNotification(
         pending_director_approval: 'بانتظار الاعتماد',
         approved: 'معتمدة',
         rejected: 'مرفوضة',
+        cancelled: 'ملغاة',
       };
       return stageMap[status] || status;
     };

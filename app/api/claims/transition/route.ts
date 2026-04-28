@@ -205,6 +205,15 @@ async function getNotificationRecipients(
       .select('id')
       .eq('role', 'director');
     if (directors) recipients.push(...directors.map((d: { id: string }) => d.id));
+
+    // Also notify designated final approvers on this contract (Migration 040)
+    const { data: finalApprovers } = await adminClient
+      .from('contract_approvers')
+      .select('user_id')
+      .eq('contract_id', claim.contract_id)
+      .eq('approval_scope', 'final_approver')
+      .eq('is_active', true);
+    if (finalApprovers) recipients.push(...finalApprovers.map((a: { user_id: string }) => a.user_id));
   }
 
   if (toStatus.startsWith('returned') && claim?.submitted_by) {
@@ -309,11 +318,60 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transitio
 
     // Step 5: Validate transition
     // Sprint B: Use contract-scoped role when available, fall back to global role
+    // Migration 040: Check contract_approvers for final approval stage
     let allowed: boolean;
     let toStatus: ClaimStatus | undefined;
     let transitionErr: string | undefined;
 
-    if (contractRole && roleSource !== 'global_role') {
+    // Special handling for pending_director_approval stage — check contract_approvers
+    if (claim.status === 'pending_director_approval' && ['approve', 'reject', 'return'].includes(action)) {
+      // Director always has access (platform owner)
+      if (userRole === 'director') {
+        const result = isTransitionAllowed(claim.status, action, 'director');
+        allowed = result.allowed;
+        toStatus = result.toStatus;
+        transitionErr = result.error;
+      } else if (userRole === 'final_approver') {
+        // Profile-level final_approver — still must be designated on this contract
+        const { count: approverCount } = await adminClient
+          .from('contract_approvers')
+          .select('id', { count: 'exact', head: true })
+          .eq('contract_id', claim.contract_id)
+          .eq('user_id', actorId)
+          .eq('approval_scope', 'final_approver')
+          .eq('is_active', true);
+
+        if ((approverCount ?? 0) > 0) {
+          // User is a designated final approver — allow final approval actions
+          const result = isTransitionAllowed(claim.status, action, 'final_approver');
+          allowed = result.allowed;
+          toStatus = result.toStatus;
+          transitionErr = result.error;
+        } else {
+          allowed = false;
+          transitionErr = 'أنت معتمد نهائي لكن غير معيّن على هذا العقد — تواصل مع مدير الإدارة';
+        }
+      } else {
+        // Other roles: check if they have contract_approvers entry (legacy support)
+        const { count: approverCount } = await adminClient
+          .from('contract_approvers')
+          .select('id', { count: 'exact', head: true })
+          .eq('contract_id', claim.contract_id)
+          .eq('user_id', actorId)
+          .eq('approval_scope', 'final_approver')
+          .eq('is_active', true);
+
+        if ((approverCount ?? 0) > 0) {
+          const result = isTransitionAllowed(claim.status, action, 'director');
+          allowed = result.allowed;
+          toStatus = result.toStatus;
+          transitionErr = result.error;
+        } else {
+          allowed = false;
+          transitionErr = 'ليس لديك صلاحية الاعتماد النهائي على هذا العقد — تواصل مع مدير الإدارة';
+        }
+      }
+    } else if (contractRole && roleSource !== 'global_role') {
       // Use contract-scoped role for transition check
       const workflowRole = contractRoleToWorkflowRole(contractRole);
       if (!workflowRole) {

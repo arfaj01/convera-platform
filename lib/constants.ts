@@ -178,14 +178,15 @@ export function isConstructionContract(type: ContractType): boolean {
  * - contractor: Project contractor/vendor (مقاول)
  */
 export const ROLE_LABELS: Record<UserRole, string> = {
-  director:   'مدير الإدارة',
-  admin:      'مدقق',
-  reviewer:   'مراجع',
-  consultant: 'جهة الإشراف',
-  contractor: 'مقاول',
+  director:       'مدير الإدارة',
+  final_approver: 'المعتمد النهائي',
+  admin:          'مدقق',
+  reviewer:       'مراجع',
+  consultant:     'جهة الإشراف',
+  contractor:     'مقاول',
   // Legacy aliases
-  auditor:    'مدقق',
-  supervisor: 'جهة الإشراف',
+  auditor:        'مدقق',
+  supervisor:     'جهة الإشراف',
 };
 
 // ─── Role Colors ────────────────────────────────────────────────
@@ -194,14 +195,15 @@ export const ROLE_LABELS: Record<UserRole, string> = {
  * Color coding for roles in workflow visualization
  */
 export const ROLE_COLORS: Record<UserRole, string> = {
-  director:   MOMAH_COLORS.darkGreen,
-  admin:      MOMAH_COLORS.teal,
-  reviewer:   MOMAH_COLORS.purple,
-  consultant: MOMAH_COLORS.gold,
-  contractor: MOMAH_COLORS.grey,
+  director:       MOMAH_COLORS.darkGreen,
+  final_approver: '#026D69',
+  admin:          MOMAH_COLORS.teal,
+  reviewer:       MOMAH_COLORS.purple,
+  consultant:     MOMAH_COLORS.gold,
+  contractor:     MOMAH_COLORS.grey,
   // Legacy aliases
-  auditor:    MOMAH_COLORS.teal,
-  supervisor: MOMAH_COLORS.gold,
+  auditor:        MOMAH_COLORS.teal,
+  supervisor:     MOMAH_COLORS.gold,
 };
 
 // ─── Workflow Action Labels (Arabic) ────────────────────────────
@@ -308,21 +310,21 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'سير الاعتماد',
     icon: '✅',
     href: '/workflow',
-    roles: ['director', 'reviewer', 'auditor', 'supervisor'],
+    roles: ['director', 'final_approver', 'reviewer', 'auditor', 'supervisor'],
   },
   {
     id: 'reports',
     label: 'التقارير',
     icon: '📈',
     href: '/reports',
-    roles: ['director', 'reviewer'],
+    roles: ['director', 'final_approver', 'reviewer'],
   },
   {
     id: 'executive',
     label: 'الأداء التنفيذي',
     icon: '🏛️',
     href: '/dashboard/executive',
-    roles: ['director', 'reviewer'],
+    roles: ['director', 'final_approver', 'reviewer'],
   },
   {
     id: 'action-center',
@@ -332,11 +334,25 @@ export const NAV_ITEMS: NavItem[] = [
     // No roles restriction — content is automatically role-scoped by the API
   },
   {
+    id: 'permissions',
+    label: 'إدارة الصلاحيات',
+    icon: '🔐',
+    href: '/permissions',
+    roles: ['director', 'admin', 'auditor', 'reviewer'],
+  },
+  {
+    id: 'import',
+    label: 'الاستيراد الجماعي',
+    icon: '📥',
+    href: '/import',
+    roles: ['director', 'admin'],
+  },
+  {
     id: 'users',
     label: 'إدارة المستخدمين',
     icon: '👥',
     href: '/users',
-    roles: ['director'],
+    roles: ['director', 'admin'],
   },
   {
     id: 'settings',
