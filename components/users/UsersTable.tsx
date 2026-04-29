@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { ROLE_LABELS } from '@/lib/constants';
+import { ROLE_LABELS, USER_ROLE_GROUPS } from '@/lib/constants';
 import type { UserRole } from '@/lib/types';
 import type { AdminUser } from '@/services/admin-users';
 
@@ -96,15 +96,22 @@ export default function UsersTable({ users, loading, onEdit, onToggleActive, onR
           />
         </div>
 
-        {/* Role filter */}
+        {/* Role filter — sourced from USER_ROLE_GROUPS so the legacy
+            DB aliases ('admin', 'consultant') never produce duplicate
+            "مدقق" / "جهة الإشراف" options. Grouped via <optgroup> per the
+            Phase 2.6 brief: الصلاحيات العامة vs أدوار العقود والمطالبات. */}
         <select
           value={roleFilter}
           onChange={e => setRoleFilter(e.target.value as UserRole | 'all')}
           className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-[#045859]/30 font-sans"
         >
           <option value="all">كل الأدوار</option>
-          {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
-            <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+          {USER_ROLE_GROUPS.map(group => (
+            <optgroup key={group.labelAr} label={group.labelAr}>
+              {group.options.map(r => (
+                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
 

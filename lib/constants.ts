@@ -170,24 +170,73 @@ export function isConstructionContract(type: ContractType): boolean {
 // ─── User Role Labels (Arabic) ──────────────────────────────────
 
 /**
- * 5-stage workflow roles:
- * - director: Final approval authority (مدير الإدارة)
- * - reviewer: Governance/اعتماد alignment monitor (مراجع)
- * - auditor: Technical auditor (مدقق)
- * - supervisor: External consulting firm representative (جهة الإشراف)
- * - contractor: Project contractor/vendor (مقاول)
+ * Display labels for every UserRole value the platform may store —
+ * INCLUDING legacy DB enum names ('admin', 'consultant') so that any
+ * row read from the database renders correctly. This map is used as a
+ * lookup, NOT as the source for dropdown options (see
+ * USER_ROLE_OPTIONS below — it dedups the legacy aliases).
+ *
+ * Canonical Arabic names per Phase 2.5 / Phase 2.6 brief:
+ *   director       → مدير الإدارة
+ *   final_approver → الاعتماد النهائي
+ *   reviewer       → الوحدة الفنية بالوزارة
+ *   auditor        → تدقيق مالي
+ *   supervisor     → المكتب الهندسي
+ *   contractor     → مقاول
+ *
+ * Legacy DB-only aliases (never shown as a dropdown option):
+ *   admin       → الوحدة الفنية بالوزارة  (DB stores 'admin' for
+ *                                          frontend role 'auditor';
+ *                                          some legacy installs reverse
+ *                                          this — keep mapping flexible)
+ *   consultant  → المكتب الهندسي           (DB stores 'consultant' for
+ *                                          frontend role 'supervisor')
  */
 export const ROLE_LABELS: Record<UserRole, string> = {
   director:       'مدير الإدارة',
-  final_approver: 'المعتمد النهائي',
-  admin:          'مدقق',
-  reviewer:       'مراجع',
-  consultant:     'جهة الإشراف',
+  final_approver: 'الاعتماد النهائي',
+  reviewer:       'الوحدة الفنية بالوزارة',
+  auditor:        'تدقيق مالي',
+  supervisor:     'المكتب الهندسي',
   contractor:     'مقاول',
-  // Legacy aliases
-  auditor:        'مدقق',
-  supervisor:     'جهة الإشراف',
+  // Legacy DB-only aliases — never shown as a dropdown option, but
+  // present so display lookups never fall through to the raw enum value.
+  admin:          'تدقيق مالي',
+  consultant:     'المكتب الهندسي',
 };
+
+// ─── Canonical UserRole options (dropdown source of truth) ──────
+
+/**
+ * UserRole groups for grouped dropdowns — guarantees no duplicates and
+ * separates global (platform-wide) authority from operational/contract
+ * roles. Driven by the Phase 2.6 brief.
+ *
+ * IMPORTANT: this list intentionally does NOT include the DB-only
+ * legacy aliases ('admin', 'consultant'). Callers iterating this list
+ * for filter dropdowns will therefore render exactly 6 options — once
+ * each.
+ */
+export const USER_ROLE_GROUPS: ReadonlyArray<{
+  labelAr: string;
+  options: ReadonlyArray<UserRole>;
+}> = [
+  {
+    labelAr: 'الصلاحيات العامة',
+    options: ['director', 'final_approver'],
+  },
+  {
+    labelAr: 'أدوار العقود والمطالبات',
+    options: ['contractor', 'supervisor', 'reviewer', 'auditor'],
+  },
+];
+
+/**
+ * Flattened canonical UserRole list (no legacy aliases, no duplicates).
+ * Order matches USER_ROLE_GROUPS for stable display.
+ */
+export const CANONICAL_USER_ROLES: ReadonlyArray<UserRole> =
+  USER_ROLE_GROUPS.flatMap(g => g.options);
 
 // ─── Role Colors ────────────────────────────────────────────────
 
