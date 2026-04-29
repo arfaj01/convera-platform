@@ -168,9 +168,14 @@ async function syncContractRoles(
     notes:         'تحديث من إدارة المستخدمين',
   }));
 
+  // Conflict target must match the unique constraint on user_contract_roles.
+  // After Migration 045 the unique key is the 3-tuple (user_id, contract_id,
+  // contract_role) — a user may now hold MULTIPLE roles on the same contract.
+  // The previous 2-tuple target ('user_id,contract_id') is no longer a valid
+  // unique key and Postgres rejects ON CONFLICT against it (error 42P10).
   const { error: upsertErr } = await admin
     .from('user_contract_roles')
-    .upsert(rows, { onConflict: 'user_id,contract_id' });
+    .upsert(rows, { onConflict: 'user_id,contract_id,contract_role' });
 
   if (upsertErr && upsertErr.code !== '23505') throw upsertErr;
 }

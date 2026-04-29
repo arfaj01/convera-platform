@@ -7,11 +7,16 @@
  * Fields: full_name_ar, full_name (EN), email, role, phone, organization,
  *         contract_roles (per-contract role assignment).
  *
- * Contract-Role Assignment:
- *  - Each contract can be assigned a role: contractor, supervisor, auditor, reviewer, viewer
- *  - Same user can have different roles on different contracts
- *  - Director sees all contracts globally — no contract assignment needed
- *  - Saved via user_contract_roles table (migration 025+)
+ * Contract-Role Assignment (multi-role):
+ *  - Each contract can be assigned ONE OR MORE roles per user.
+ *  - Same user can have different role-sets on different contracts.
+ *  - Director sees all contracts globally — no contract assignment needed.
+ *  - Saved via user_contract_roles table (migrations 025 + 045). Migration
+ *    045 relaxed the row-level UNIQUE key to (user_id, contract_id,
+ *    contract_role), so a single (user, contract) pair may carry multiple
+ *    rows — one per distinct role.
+ *  - Backward compat: existing single-role users render as a single
+ *    checked checkbox on their assigned contract.
  */
 
 import { useState, useEffect } from 'react';
@@ -30,13 +35,30 @@ const ROLE_OPTIONS: { value: UserRole; labelAr: string; desc: string }[] = [
   { value: 'contractor', labelAr: 'مقاول',          desc: 'تقديم وتتبع المطالبات' },
 ];
 
-// Contract-scoped roles available for assignment
-const CONTRACT_ROLE_OPTIONS: { value: ContractRole; labelAr: string }[] = [
-  { value: 'contractor', labelAr: 'مقاول' },
-  { value: 'supervisor', labelAr: 'جهة إشراف' },
-  { value: 'auditor',    labelAr: 'مدقق' },
-  { value: 'reviewer',   labelAr: 'مراجع' },
-  { value: 'viewer',     labelAr: 'مطلع فقط' },
+// Contract-scoped roles available for assignment.
+// Aligned with Migration 045's contract_role enum and the canonical role
+// names used across the platform (مقاول / المكتب الهندسي / تدقيق /
+// الوحدة الفنية / وحدة الجودة / مدير المشروع / الاعتماد النهائي / مشاهدة).
+//
+// `kind` distinguishes:
+//   - 'workflow'  : gates a workflow stage transition (contractor / supervisor /
+//                   auditor / reviewer / final_approver)
+//   - 'advisory'  : has visibility but does NOT change claim.status
+//                   (project_manager nudge/escalation, quality comments, viewer)
+const CONTRACT_ROLE_OPTIONS: {
+  value: ContractRole;
+  labelAr: string;
+  kind: 'workflow' | 'advisory';
+  hint?: string;
+}[] = [
+  { value: 'contractor',      labelAr: 'مقاول',                         kind: 'workflow', hint: 'تقديم وتتبع المطالبات' },
+  { value: 'supervisor',      labelAr: 'المكتب الهندسي',                kind: 'workflow', hint: 'مراجعة فنية أولى — جهة الإشراف' },
+  { value: 'auditor',         labelAr: 'تدقيق',                          kind: 'workflow', hint: 'تدقيق فني للمطالبات' },
+  { value: 'reviewer',        labelAr: 'الوحدة الفنية',                  kind: 'workflow', hint: 'مراجعة قبل الاعتماد النهائي' },
+  { value: 'final_approver',  labelAr: 'الاعتماد النهائي',               kind: 'workflow', hint: 'صلاحية الاعتماد أو الرفض النهائي' },
+  { value: 'project_manager', labelAr: 'مدير المشروع',                   kind: 'advisory', hint: 'متابعة وتنبيه — بدون تغيير حالة' },
+  { value: 'quality',         labelAr: 'وحدة الجودة',                    kind: 'advisory', hint: 'ملاحظات جودة — بدون تغيير حالة' },
+  { value: 'viewer',          labelAr: 'مشاهدة',                         kind: 'advisory', hint: 'اطلاع فقط' },
 ];
 
 // Roles that should display the linked contracts selector
@@ -78,21 +100,28 @@ export default function UserFormModal({
   const [phone,         setPhone]         = useState(initialUser?.phone        || '');
   const [organization,  setOrganization]  = useState(initialUser?.organization || '');
 
-  // Contract-role assignments: { contract_id → contract_role }
-  const [contractRoles, setContractRoles] = useState<Map<string, ContractRole>>(
+  // Contract-role assignments: { contract_id → ContractRole[] } (multi-role).
+  // After Migration 045 a single (user, contract) pair may hold multiple
+  // rows in user_contract_roles — one per distinct role. The map collapses
+  // those rows back into a per-contract role-set for the UI.
+  const [contractRoles, setContractRoles] = useState<Map<string, ContractRole[]>>(
     () => {
-      const map = new Map<string, ContractRole>();
-      // Initialize from new contract_roles if available
+      const map = new Map<string, ContractRole[]>();
+      // Initialize from new contract_roles if available — append per row.
       if (initialUser?.contract_roles) {
         for (const cr of initialUser.contract_roles) {
-          map.set(cr.contract_id, cr.contract_role);
+          const existing = map.get(cr.contract_id) ?? [];
+          if (!existing.includes(cr.contract_role)) existing.push(cr.contract_role);
+          map.set(cr.contract_id, existing);
         }
       }
-      // Fall back to legacy linked_contract_ids (assign default role matching user's profile role)
+      // Fall back to legacy linked_contract_ids (assign default role matching
+      // user's profile role) — single-role bootstrapping for users created
+      // before user_contract_roles existed.
       else if (initialUser?.linked_contract_ids) {
         const defaultRole = userRoleToContractRole(initialUser.role);
         for (const cid of initialUser.linked_contract_ids) {
-          map.set(cid, defaultRole);
+          map.set(cid, [defaultRole]);
         }
       }
       return map;
@@ -123,14 +152,23 @@ export default function UserFormModal({
     if (!validate()) return;
     setSaving(true);
     try {
-      // Build contract_roles array from the Map
+      // Build contract_roles array from the multi-role Map. Each (contract,
+      // role) pair becomes one assignment — a contract with N roles emits
+      // N rows. This matches the user_contract_roles row-per-role shape.
       const crArray: ContractRoleAssignment[] = [];
-      contractRoles.forEach((contractRole, contractId) => {
-        crArray.push({ contract_id: contractId, contract_role: contractRole });
+      contractRoles.forEach((roles, contractId) => {
+        for (const cr of roles) {
+          crArray.push({ contract_id: contractId, contract_role: cr });
+        }
       });
 
       // Also build legacy linked_contract_ids for backward compatibility
-      const linkedIds = role === 'director' ? [] : Array.from(contractRoles.keys());
+      // — one entry per contract that has at least one assigned role.
+      const linkedIds = role === 'director'
+        ? []
+        : Array.from(contractRoles.entries())
+            .filter(([, roles]) => roles.length > 0)
+            .map(([cid]) => cid);
 
       if (isCreate) {
         await onConfirm({
@@ -159,31 +197,55 @@ export default function UserFormModal({
     }
   };
 
-  // Toggle a contract: if already assigned → remove; if not → add with default role
+  // Toggle whether a contract is linked at all (selects/deselects all roles).
+  // - If any role is currently assigned → clear them all (unlink the contract).
+  // - If no roles are assigned → seed with the default role inferred from the
+  //   user's global role.
   const toggleContract = (contractId: string) => {
     setContractRoles(prev => {
       const next = new Map(prev);
-      if (next.has(contractId)) {
+      const existing = next.get(contractId);
+      if (existing && existing.length > 0) {
         next.delete(contractId);
       } else {
-        // Default contract role matches the user's profile role
-        next.set(contractId, userRoleToContractRole(role));
+        next.set(contractId, [userRoleToContractRole(role)]);
       }
       return next;
     });
   };
 
-  // Change the role assigned on a specific contract
-  const setContractRoleForContract = (contractId: string, newRole: ContractRole) => {
+  // Toggle a single ContractRole on a specific contract (multi-role checkbox).
+  // Adding the first role auto-links the contract; removing the last role
+  // leaves an empty array, which is filtered out at submit time.
+  const toggleContractRole = (contractId: string, cr: ContractRole) => {
     setContractRoles(prev => {
       const next = new Map(prev);
-      next.set(contractId, newRole);
+      const existing = next.get(contractId) ?? [];
+      const idx = existing.indexOf(cr);
+      if (idx >= 0) {
+        const updated = existing.filter(r => r !== cr);
+        if (updated.length === 0) {
+          next.delete(contractId);
+        } else {
+          next.set(contractId, updated);
+        }
+      } else {
+        next.set(contractId, [...existing, cr]);
+      }
       return next;
     });
   };
 
-  const showContractSelector = ROLES_WITH_CONTRACT_LINKS.includes(role) && availableContracts.length > 0;
-  const assignedCount = contractRoles.size;
+  // The contract selector is only relevant for roles that operate on
+  // specific contracts. For directors and other global roles we hide it.
+  const roleNeedsContractLinks = ROLES_WITH_CONTRACT_LINKS.includes(role);
+  const showContractSelector = roleNeedsContractLinks && availableContracts.length > 0;
+  // Empty-state: role wants contract links but no contracts exist in the
+  // workspace yet. We surface a helpful message instead of silently hiding
+  // the section.
+  const showNoContractsHint = roleNeedsContractLinks && availableContracts.length === 0;
+  // A contract counts as "assigned" if it has at least one role.
+  const assignedCount = Array.from(contractRoles.values()).filter(r => r.length > 0).length;
 
   return (
     <div
@@ -195,10 +257,11 @@ export default function UserFormModal({
         {/* Header */}
         <div className="bg-[#045859] px-5 py-4 flex items-center justify-between">
           <h2 className="text-white font-bold text-[15px]">
-            {isCreate ? '➕ إضافة مستخدم جديد' : '✏️ تعديل بيانات المستخدم'}
+            {isCreate ? 'إضافة مستخدم جديد' : 'تعديل بيانات المستخدم'}
           </h2>
           <button
             onClick={onClose}
+            aria-label="إغلاق"
             className="text-white/60 hover:text-white text-xl leading-none cursor-pointer bg-transparent border-none font-sans"
           >
             ×
@@ -302,8 +365,8 @@ export default function UserFormModal({
                   type="button"
                   onClick={() => {
                     const defaultCR = userRoleToContractRole(role);
-                    const map = new Map<string, ContractRole>();
-                    availableContracts.forEach(c => map.set(c.id, defaultCR));
+                    const map = new Map<string, ContractRole[]>();
+                    availableContracts.forEach(c => map.set(c.id, [defaultCR]));
                     setContractRoles(map);
                   }}
                   className="text-[0.68rem] text-teal hover:text-teal-dark font-bold bg-transparent border-none cursor-pointer font-sans underline"
@@ -320,67 +383,133 @@ export default function UserFormModal({
                 </button>
               </div>
 
-              {/* Contract rows with role dropdown */}
-              <div className="space-y-1.5 max-h-64 overflow-y-auto border border-gray-100 rounded-lg p-2 bg-gray-50">
+              {/* Contract rows — each row shows a per-role checkbox group so a
+                  user may hold MULTIPLE roles on the same contract. The
+                  master checkbox controls whether the contract is linked at
+                  all (clears every role-checkbox in one click). */}
+              <div className="space-y-1.5 max-h-72 overflow-y-auto border border-gray-100 rounded-lg p-2 bg-gray-50">
                 {availableContracts.map(c => {
-                  const isLinked = contractRoles.has(c.id);
-                  const assignedRole = contractRoles.get(c.id);
+                  const assignedRoles = contractRoles.get(c.id) ?? [];
+                  const isLinked = assignedRoles.length > 0;
                   return (
                     <div
                       key={c.id}
                       className={`
-                        flex items-center gap-2.5 p-2.5 rounded-lg transition-all
+                        rounded-lg transition-all p-2.5
                         ${isLinked
                           ? 'bg-[#E8F4F4] border border-[#045859]/20'
                           : 'bg-white border border-gray-100 hover:border-[#045859]/20'}
                       `}
                     >
-                      {/* Checkbox */}
-                      <input
-                        type="checkbox"
-                        checked={isLinked}
-                        onChange={() => toggleContract(c.id)}
-                        className="accent-[#045859] flex-shrink-0 cursor-pointer"
-                      />
+                      <div className="flex items-center gap-2.5">
+                        {/* Master checkbox — links / unlinks the contract */}
+                        <input
+                          type="checkbox"
+                          checked={isLinked}
+                          onChange={() => toggleContract(c.id)}
+                          className="accent-[#045859] flex-shrink-0 cursor-pointer"
+                          aria-label={`ربط العقد ${c.title}`}
+                        />
 
-                      {/* Contract info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[0.78rem] font-bold text-[#045859] truncate">
-                          {c.title}
+                        {/* Contract info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[0.78rem] font-bold text-[#045859] truncate">
+                            {c.title}
+                          </div>
+                          <div className="text-[0.65rem] text-gray-400">
+                            {c.no}
+                            {isLinked && (
+                              <span className="ms-1 text-[#045859]">
+                                · {assignedRoles.length === 1 ? 'دور واحد' : `${assignedRoles.length} أدوار`}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-[0.65rem] text-gray-400">{c.no}</div>
+
+                        {isLinked && (
+                          <span className="text-[#87BA26] text-sm flex-shrink-0" aria-hidden>✓</span>
+                        )}
                       </div>
 
-                      {/* Role dropdown (only when linked) */}
+                      {/* Per-role checkbox group (only when contract is linked).
+                          Each pill is its own checkbox — select any combination.
+                          Workflow roles render in teal; advisory roles (project
+                          manager, quality, viewer) render in grey to signal
+                          they don't gate transitions. */}
                       {isLinked && (
-                        <select
-                          value={assignedRole || 'contractor'}
-                          onChange={e => setContractRoleForContract(c.id, e.target.value as ContractRole)}
-                          className="text-[0.72rem] border border-[#045859]/20 rounded-md px-2 py-1.5 bg-white text-[#045859] font-bold focus:outline-none focus:ring-1 focus:ring-[#045859]/30 cursor-pointer"
-                          dir="rtl"
-                        >
-                          {CONTRACT_ROLE_OPTIONS.map(opt => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.labelAr}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-
-                      {isLinked && (
-                        <span className="text-[#87BA26] text-sm flex-shrink-0">✓</span>
+                        <div className="mt-2 flex flex-wrap gap-1.5 ps-7">
+                          {CONTRACT_ROLE_OPTIONS.map(opt => {
+                            const isSel = assignedRoles.includes(opt.value);
+                            const isAdvisory = opt.kind === 'advisory';
+                            return (
+                              <label
+                                key={opt.value}
+                                title={opt.hint}
+                                className={`
+                                  inline-flex items-center gap-1 px-2 py-1 rounded-full
+                                  text-[0.68rem] font-bold cursor-pointer select-none border transition-colors
+                                  ${isSel
+                                    ? (isAdvisory
+                                        ? 'bg-gray-600 text-white border-gray-600'
+                                        : 'bg-[#045859] text-white border-[#045859]')
+                                    : (isAdvisory
+                                        ? 'bg-white text-gray-500 border-gray-300 hover:border-gray-500'
+                                        : 'bg-white text-[#045859] border-[#045859]/30 hover:border-[#045859]')}
+                                `}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSel}
+                                  onChange={() => toggleContractRole(c.id, opt.value)}
+                                  className="accent-[#045859] w-3 h-3 cursor-pointer"
+                                  aria-label={`${opt.labelAr} على ${c.title}`}
+                                />
+                                <span>{opt.labelAr}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
                   );
                 })}
               </div>
+
+              {/* Legend — clarifies the workflow vs advisory distinction */}
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-[0.62rem] text-gray-500">
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block w-2 h-2 rounded-full bg-[#045859]" aria-hidden />
+                  أدوار سير الاعتماد
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block w-2 h-2 rounded-full bg-gray-500" aria-hidden />
+                  أدوار استشارية / متابعة (لا تغيّر حالة المطالبة)
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Empty-state when no contracts available but the role wants
+              contract links. Replaces the previous silent-hide behaviour. */}
+          {showNoContractsHint && (
+            <div className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50 text-center">
+              <p className="text-[0.78rem] font-bold text-gray-600 mb-1">
+                لا توجد عقود متاحة للربط
+              </p>
+              <p className="text-[0.68rem] text-gray-500 leading-relaxed">
+                لا يمكن تعيين أدوار عقدية لهذا المستخدم حتى يتم إنشاء عقد واحد على الأقل.
+                يمكنك حفظ المستخدم الآن وإضافة الأدوار لاحقاً من شاشة المستخدمين.
+              </p>
             </div>
           )}
 
           {/* Director note */}
           {role === 'director' && (
             <div className="flex items-start gap-2 p-3 bg-[#FFF8E0] border border-[#FFC845]/30 rounded-lg text-[0.72rem]">
-              <span>ℹ️</span>
+              <span
+                aria-hidden
+                className="inline-block w-1 h-4 bg-[#FFC845] rounded-sm flex-shrink-0 mt-0.5"
+              />
               <p className="text-[#045859]">
                 مدير الإدارة يرى جميع العقود تلقائياً بغض النظر عن الربط.
               </p>

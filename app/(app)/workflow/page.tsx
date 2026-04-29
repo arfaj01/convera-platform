@@ -52,16 +52,19 @@ const CONTRACT_ROLE_STATUSES: Partial<Record<ContractRole, ClaimStatus[]>> = {
 };
 
 // ─── ContractRole → Arabic labels (display only) ────────────────
-// Used by the multi-role badges strip. Pure display layer; no logic.
+// Canonical role names per Phase 2.5 standardization brief. Single
+// source of truth across the platform — used by the multi-role badges
+// strip on this page and mirrored in claims/[id]/page.tsx and
+// components/users/UserFormModal.tsx. Pure display layer; no logic.
 const CONTRACT_ROLE_LABELS: Record<ContractRole, string> = {
   contractor:      'مقاول',
-  supervisor:      'جهة الإشراف',
-  auditor:         'مدقق',
-  reviewer:        'مراجع',
-  viewer:          'مُشاهد',
-  project_manager: 'مدير مشروع',
-  quality:         'جودة',
-  final_approver:  'معتمد نهائي',
+  supervisor:      'المكتب الهندسي',
+  auditor:         'تدقيق',
+  reviewer:        'الوحدة الفنية',
+  viewer:          'مشاهدة',
+  project_manager: 'مدير المشروع',
+  quality:         'وحدة الجودة',
+  final_approver:  'الاعتماد النهائي',
 };
 
 // Legacy fallback
