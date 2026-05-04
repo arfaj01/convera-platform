@@ -36,8 +36,12 @@ export type NotificationEvent =
   | 'claim.submitted'
   | 'claim.resubmitted'
   | 'supervisor.approved'
-  | 'auditor.approved'
-  | 'reviewer.approved'
+  | 'auditor.approved'              // legacy pre-Migration-046 path
+  | 'reviewer.approved'             // legacy pre-Migration-046 path
+  // Phase 2.6 — new gating stages, per upgrade plan §3a forward path.
+  | 'technical.approved'
+  | 'quality.approved'
+  | 'pm.approved'
   | 'director.approved'
   | 'claim.returned'
   | 'claim.rejected'
@@ -120,6 +124,42 @@ export interface EventContext {
   slaBreached?: boolean;
 }
 
+// ─── Phase 2.6 — Return-target Arabic label ──────────────────────
+
+/**
+ * Short Arabic label for the destination of a flexible-return.
+ *
+ * Used by the `claim.returned` body template to render
+ * "تم إرجاع المطالبة #X من <source> إلى <target>".
+ *
+ * The mapping covers:
+ *   • All `returned_by_*` sinks (return-to-contractor) → "المقاول"
+ *   • All `under_*_review` destinations (return-to-earlier-stage)
+ *     → the human stage name
+ *
+ * Falls back to `getStageLabel(toStatus)` for any unknown status —
+ * the workflow-engine map already contains every valid value.
+ */
+function getReturnTargetLabelAr(toStatus: ClaimStatus): string {
+  const labels: Partial<Record<ClaimStatus, string>> = {
+    // Return-to-contractor sinks
+    returned_by_supervisor:       'المقاول',
+    returned_by_auditor:          'المقاول',
+    returned_by_technical:        'المقاول',
+    returned_by_quality:          'المقاول',
+    returned_by_project_manager:  'المقاول',
+    returned_by_final_approver:   'المقاول',
+    // Return-to-earlier-review-stage destinations
+    under_supervisor_review:      'المكتب الهندسي',
+    under_auditor_review:         'المدقق',
+    under_reviewer_check:         'المراجع',
+    under_technical_review:       'الوحدة الفنية بالوزارة',
+    under_quality_review:         'وحدة الجودة بالوزارة',
+    under_project_manager_review: 'مدير المشروع',
+  };
+  return labels[toStatus] ?? getStageLabel(toStatus);
+}
+
 // ─── Arabic Message Templates ────────────────────────────────────
 
 const EVENT_MESSAGES: Record<NotificationEvent, {
@@ -147,10 +187,15 @@ const EVENT_MESSAGES: Record<NotificationEvent, {
     channel: 'both',
   },
   'supervisor.approved': {
-    title: (ctx) => `تمت إحالة المطالبة #${ctx.claim.claim_no} للتدقيق`,
+    // Phase 2.6 — supervisor approve now routes to under_technical_review
+    // (the Technical Unit), not the legacy auditor stage. Body updated
+    // to match. Title also uses the canonical Phase 2.6 Arabic term
+    // for the supervisor role ("المكتب الهندسي").
+    title: (ctx) => `تمت إحالة المطالبة #${ctx.claim.claim_no} للوحدة الفنية بالوزارة`,
     body: (ctx) =>
-      `وافقت جهة الإشراف (${ctx.actorName}) على المطالبة رقم ${ctx.claim.claim_no}` +
-      ` وتم إحالتها لكم للتدقيق.`,
+      `وافق المكتب الهندسي (${ctx.actorName}) على المطالبة رقم ${ctx.claim.claim_no}` +
+      (ctx.claim.contract_no ? ` — العقد ${ctx.claim.contract_no}` : '') +
+      ` وتم إحالتها للوحدة الفنية بالوزارة.`,
     notificationType: 'claim_forwarded',
     channel: 'both',
   },
@@ -170,6 +215,34 @@ const EVENT_MESSAGES: Record<NotificationEvent, {
     notificationType: 'claim_pending_approval',
     channel: 'both',
   },
+  // ── Phase 2.6 — new gating-stage approve events ────────────────
+  'technical.approved': {
+    title: (ctx) => `تمت إحالة المطالبة #${ctx.claim.claim_no} لوحدة الجودة`,
+    body: (ctx) =>
+      `أتمّت الوحدة الفنية بالوزارة (${ctx.actorName}) فحص المطالبة رقم ${ctx.claim.claim_no}` +
+      (ctx.claim.contract_no ? ` — العقد ${ctx.claim.contract_no}` : '') +
+      ` وتم إحالتها لوحدة الجودة بالوزارة لاعتماد الجودة.`,
+    notificationType: 'claim_forwarded',
+    channel: 'both',
+  },
+  'quality.approved': {
+    title: (ctx) => `تمت إحالة المطالبة #${ctx.claim.claim_no} لمدير المشروع`,
+    body: (ctx) =>
+      `وافقت وحدة الجودة بالوزارة (${ctx.actorName}) على المطالبة رقم ${ctx.claim.claim_no}` +
+      (ctx.claim.contract_no ? ` — العقد ${ctx.claim.contract_no}` : '') +
+      ` وتم إحالتها لمدير المشروع للمراجعة النهائية.`,
+    notificationType: 'claim_forwarded',
+    channel: 'both',
+  },
+  'pm.approved': {
+    title: (ctx) => `المطالبة #${ctx.claim.claim_no} بانتظار الاعتماد النهائي`,
+    body: (ctx) =>
+      `أتمّ مدير المشروع (${ctx.actorName}) مراجعة المطالبة رقم ${ctx.claim.claim_no}` +
+      (ctx.claim.contract_no ? ` — العقد ${ctx.claim.contract_no}` : '') +
+      ` وتم رفعها للاعتماد النهائي.`,
+    notificationType: 'claim_pending_approval',
+    channel: 'both',
+  },
   'director.approved': {
     title: (ctx) => `تم اعتماد المطالبة #${ctx.claim.claim_no} نهائياً`,
     body: (ctx) =>
@@ -180,12 +253,21 @@ const EVENT_MESSAGES: Record<NotificationEvent, {
     channel: 'both',
   },
   'claim.returned': {
-    title: (ctx) => `تم إرجاع المطالبة #${ctx.claim.claim_no} — يرجى التصحيح`,
+    // Phase 2.6 — title now names the destination so a glance at the
+    // notification list reveals where the claim went.
+    title: (ctx) => {
+      const targetStage = getReturnTargetLabelAr(ctx.toStatus);
+      return `تم إرجاع المطالبة #${ctx.claim.claim_no} إلى ${targetStage}`;
+    },
+    // Phase 2.6 — body follows the upgrade-plan canonical format:
+    //   "تم إرجاع المطالبة رقم {claimNo} من {sourceStage} إلى {targetStage}.
+    //    السبب: {reason}"
     body: (ctx) => {
-      const stageLabel = getStageLabel(ctx.fromStatus || ctx.claim.status);
-      let msg = `تم إرجاع المطالبة رقم ${ctx.claim.claim_no} من مرحلة "${stageLabel}" بواسطة ${ctx.actorName}.`;
+      const sourceStage = getStageLabel(ctx.fromStatus ?? ctx.claim.status);
+      const targetStage = getReturnTargetLabelAr(ctx.toStatus);
+      let msg = `تم إرجاع المطالبة رقم ${ctx.claim.claim_no} من ${sourceStage} إلى ${targetStage} بواسطة ${ctx.actorName}.`;
       if (ctx.claim.return_reason) {
-        msg += ` سبب الإرجاع: ${ctx.claim.return_reason}`;
+        msg += ` السبب: ${ctx.claim.return_reason}`;
       }
       return msg;
     },
@@ -323,8 +405,12 @@ export function resolveNotificationEvent(
   // Approvals — route by from-status to know which stage approved
   if (action === 'approve') {
     if (fromStatus === 'under_supervisor_review') return 'supervisor.approved';
-    if (fromStatus === 'under_auditor_review') return 'auditor.approved';
-    if (fromStatus === 'under_reviewer_check') return 'reviewer.approved';
+    if (fromStatus === 'under_auditor_review') return 'auditor.approved';     // legacy
+    if (fromStatus === 'under_reviewer_check') return 'reviewer.approved';    // legacy
+    // Phase 2.6 — new pipeline stages
+    if (fromStatus === 'under_technical_review') return 'technical.approved';
+    if (fromStatus === 'under_quality_review') return 'quality.approved';
+    if (fromStatus === 'under_project_manager_review') return 'pm.approved';
     if (fromStatus === 'pending_director_approval') return 'director.approved';
     // Submitted auto-route
     if (fromStatus === 'submitted') return 'claim.submitted';
@@ -357,17 +443,35 @@ export function getTargetRolesForStatus(toStatus: ClaimStatus): {
     case 'under_supervisor_review':
       return { contractRoles: ['supervisor'], globalRoles: [], notifySubmitter: false };
 
+    // Legacy paths (pre-Migration-046 in-flight claims)
     case 'under_auditor_review':
       return { contractRoles: ['auditor'], globalRoles: [], notifySubmitter: false };
 
     case 'under_reviewer_check':
       return { contractRoles: ['reviewer'], globalRoles: [], notifySubmitter: false };
 
-    case 'pending_director_approval':
-      return { contractRoles: [], globalRoles: ['director'], notifySubmitter: false };
+    // Phase 2.6 — new gating stages.
+    case 'under_technical_review':
+      return { contractRoles: ['reviewer'], globalRoles: [], notifySubmitter: false };
 
+    case 'under_quality_review':
+      return { contractRoles: ['quality'], globalRoles: [], notifySubmitter: false };
+
+    case 'under_project_manager_review':
+      return { contractRoles: ['project_manager'], globalRoles: [], notifySubmitter: false };
+
+    case 'pending_director_approval':
+      // Final approvers (contract-scoped) + global director.
+      return { contractRoles: ['final_approver'], globalRoles: ['director'], notifySubmitter: false };
+
+    // Every returned_by_* sink notifies the submitter (the contractor).
     case 'returned_by_supervisor':
     case 'returned_by_auditor':
+    // Phase 2.6 — new returned-to-contractor sinks.
+    case 'returned_by_technical':
+    case 'returned_by_quality':
+    case 'returned_by_project_manager':
+    case 'returned_by_final_approver':
       return { contractRoles: [], globalRoles: [], notifySubmitter: true };
 
     case 'approved':
