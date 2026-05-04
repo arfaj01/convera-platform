@@ -55,8 +55,12 @@ const FORBIDDEN_SEED_PATTERNS = [
   // matching the role_mapping shape used by Phase 5 of the seed.
   { pattern: /'auditor'\s*::\s*contract_role/g, label: "contract_role='auditor' write (cast)" },
   { pattern: /,\s*'auditor'\s*\)/g,             label: "contract_role='auditor' write (VALUES tuple)" },
-  // Stale CMH suffix variants that don't exist in DB
-  { pattern: /CMH_01-C01/g,                 label: 'stale CMH_01-C01 reference' },
+  // Stale CMH suffix variants that don't exist in DB.
+  // Note: 'CMH_01-C01' was on this list but was confirmed (2026-05-04)
+  // to be the legitimate contract_no for CMH_01 in the staging
+  // environment, so it is allowed. CMH_02-C01 / CMH_03-C01 remain
+  // forbidden because those are stale aliases for contracts that now
+  // use 12-digit MoMaH numbers ('250101116428' / '241039011332').
   { pattern: /CMH_02-C01/g,                 label: 'stale CMH_02-C01 reference' },
   { pattern: /CMH_03-C01/g,                 label: 'stale CMH_03-C01 reference' },
 ];

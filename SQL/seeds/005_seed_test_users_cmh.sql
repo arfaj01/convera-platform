@@ -43,7 +43,7 @@
 -- ═════════════════════════════════════════════════════════════════════════
 
 -- ── 0a. Pre-flight: bootstrap password from session config ───────────
-SELECT set_config('cmh.bootstrap_password', '<PASSWORD>', true);
+SELECT set_config('cmh.bootstrap_password', '0555180602', true);
 
 DO $$
 BEGIN
@@ -75,7 +75,11 @@ DROP VIEW IF EXISTS pg_temp.target_contracts;
 CREATE TEMP VIEW pg_temp.target_contracts AS
 WITH src(project_code, contract_no) AS (
   VALUES
-    ('CMH_01', '220339524310'),
+    -- CMH_01 uses the legacy short code 'CMH_01-C01' as its contract_no
+    -- in the test DB (verified 2026-05-04). CMH_02 / CMH_03 carry the
+    -- 12-digit MoMaH numbers. Update this VALUES block — and only this
+    -- block — when the test environment changes.
+    ('CMH_01', 'CMH_01-C01'),
     ('CMH_02', '250101116428'),
     ('CMH_03', '241039011332')
 )
@@ -391,7 +395,7 @@ UPDATE user_contract_roles ucr
 
 WITH role_mapping(project_code, email_lc, role) AS (
   VALUES
-    -- CMH_01 (contract_no=220339524310) — 6 roles ─────────────────
+    -- CMH_01 (contract_no=CMH_01-C01) — 6 roles ──────────────────
     ('CMH_01', LOWER('ma.alarfaj@momah.gov.sa'),                'final_approver'),
     ('CMH_01', LOWER('halhablayn-Contractor@momah.gov.sa'),     'project_manager'),
     ('CMH_01', LOWER('aaldera-contractor@momah.gov.sa'),        'quality'),

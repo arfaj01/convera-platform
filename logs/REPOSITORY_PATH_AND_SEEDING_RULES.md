@@ -52,7 +52,7 @@ Mappings (Phase 2.6 smoke-test set):
 
 | project_code | contract_no |
 |---|---|
-| `CMH_01` | `220339524310` |
+| `CMH_01` | `CMH_01-C01` |
 | `CMH_02` | `250101116428` |
 | `CMH_03` | `241039011332` |
 
