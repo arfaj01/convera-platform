@@ -13,20 +13,47 @@
  * - Approved/rejected claims are immutable
  */
 
-import type { ClaimStatus, ContractRole, UserRole, WorkflowTransition, WorkflowState } from './types';
+import type {
+  ClaimStatus,
+  ContractRole,
+  UserRole,
+  WorkflowRole,
+  WorkflowTransition,
+  WorkflowState,
+} from './types';
+
+// Re-export WorkflowRole for callers that already import it from
+// './workflow-engine' to keep the public surface stable.
+export type { WorkflowRole };
 
 // ─── Type Definitions ────────────────────────────────────────────
 
 /**
- * Represents a valid state transition with constraints
+ * Represents a valid state transition with constraints.
+ *
+ * Phase 2.6 (commit #4) additions:
+ *   • `allowedRoles` is now `WorkflowRole[]` (was `UserRole[]`) — the
+ *     two new gating stages (Quality Unit, Project Manager) reference
+ *     ContractRole identifiers that don't exist in the UserRole enum.
+ *     Callers that pass a `UserRole` value still work because
+ *     `UserRole ⊂ WorkflowRole`.
+ *   • `returnTargets` — when set, the transition is a flexible-return
+ *     action: the reviewer may pick any of the listed target stages at
+ *     runtime. The default `toStatus` is the contractor-bound
+ *     `returned_by_*` value, so legacy callers that don't know about
+ *     flexible returns continue to send the claim back to the
+ *     contractor exactly as before. The picked target MUST be in the
+ *     `returnTargets` list — the API route enforces this allow-list
+ *     (Phase 2.6 commit #7).
  */
 export interface TransitionDef {
   action: string;
   toStatus: ClaimStatus;
-  allowedRoles: UserRole[];
+  allowedRoles: WorkflowRole[];
   requiresNote: boolean;
   minNoteLength?: number;
   description: string;
+  returnTargets?: Array<{ toStatus: ClaimStatus; labelAr: string }>;
 }
 
 /**
@@ -59,8 +86,38 @@ export interface ClaimWorkflowMetadata {
 // ─── State Machine Definition ────────────────────────────────────
 
 /**
- * Complete state transition matrix
- * Defines all valid transitions per status and role
+ * Complete state transition matrix.
+ *
+ * Phase 2.6 pipeline (commit #4 — populated 2026-04-29):
+ *
+ *   Forward path:
+ *     draft → under_supervisor_review (Engineering Consultant)
+ *           → under_technical_review (Technical Unit بالوزارة)
+ *           → under_quality_review (Quality Unit بالوزارة, 1-day SLA)
+ *           → under_project_manager_review (Project Manager)
+ *           → pending_director_approval (Final Approval)
+ *           → approved | rejected
+ *
+ *   Side transitions (consultant stage only): contractor can withdraw
+ *   (→ draft) or cancel (→ cancelled).
+ *
+ *   Resubmit: every returned_by_* status routes back to
+ *   under_supervisor_review when the contractor re-submits, so
+ *   downstream review is re-performed on every revision.
+ *
+ *   Flexible return (§3d): every gating stage exposes a single `return`
+ *   action whose `returnTargets` lists the stages the reviewer may pick
+ *   from. The default `toStatus` is the contractor-bound returned_by_*
+ *   value; the reviewer may instead route the claim back to any
+ *   *earlier* gating stage via its under_*_review status. Server-side
+ *   allow-list validation lives in /api/claims/transition (Phase 2.6
+ *   commit #7).
+ *
+ *   Legacy paths: under_auditor_review and under_reviewer_check remain
+ *   in CLAIM_TRANSITIONS so claims that entered the pipeline before
+ *   Migration 046 can still be acted on. New claims do not enter these
+ *   statuses (the supervisor's `approve` action now routes to
+ *   under_technical_review instead of under_auditor_review).
  */
 export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
   draft: [
@@ -84,13 +141,16 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
   // DB trigger blocks any UPDATE that sets claims.status = 'submitted'.
   submitted: [],
 
+  // ── Stage 1: Engineering Consultant (المكتب الهندسي) ──────────────
   under_supervisor_review: [
     {
       action: 'approve',
-      toStatus: 'under_auditor_review',
+      // Phase 2.6: routes to the Technical Unit gate (NEW pipeline)
+      // instead of the legacy under_auditor_review.
+      toStatus: 'under_technical_review',
       allowedRoles: ['supervisor'],
       requiresNote: false,
-      description: 'جهة الإشراف توافق على المطالبة',
+      description: 'المكتب الهندسي يوافق ويحيل للوحدة الفنية بالوزارة',
     },
     {
       action: 'return',
@@ -98,21 +158,24 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
       allowedRoles: ['supervisor'],
       requiresNote: true,
       minNoteLength: 20,
-      description: 'جهة الإشراف ترجع المطالبة للمقاول',
+      description: 'المكتب الهندسي يرجع المطالبة للمقاول',
+      returnTargets: [
+        { toStatus: 'returned_by_supervisor', labelAr: 'المقاول' },
+      ],
     },
     {
       action: 'withdraw',
       toStatus: 'draft',
       allowedRoles: ['contractor'],
       requiresNote: false,
-      description: 'المقاول يسحب المطالبة قبل اتخاذ إجراء من جهة الإشراف',
+      description: 'المقاول يسحب المطالبة قبل اتخاذ إجراء من المكتب الهندسي',
     },
     {
       action: 'cancel',
       toStatus: 'cancelled',
       allowedRoles: ['contractor'],
       requiresNote: false,
-      description: 'المقاول يلغي المطالبة نهائياً قبل اتخاذ إجراء من جهة الإشراف',
+      description: 'المقاول يلغي المطالبة نهائياً قبل اتخاذ إجراء من المكتب الهندسي',
     },
   ],
 
@@ -122,17 +185,123 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
       toStatus: 'under_supervisor_review',
       allowedRoles: ['contractor'],
       requiresNote: false,
-      description: 'مقاول يعيد تقديم المطالبة — توجيه مباشر لجهة الإشراف',
+      description: 'مقاول يعيد تقديم المطالبة — توجيه مباشر للمكتب الهندسي',
     },
   ],
 
+  // ── Stage 2: Technical Unit (الوحدة الفنية بالوزارة) ──────────────
+  under_technical_review: [
+    {
+      action: 'approve',
+      toStatus: 'under_quality_review',
+      allowedRoles: ['reviewer'],
+      requiresNote: false,
+      description: 'الوحدة الفنية بالوزارة توافق وتحيل لوحدة الجودة',
+    },
+    {
+      action: 'return',
+      toStatus: 'returned_by_technical',
+      allowedRoles: ['reviewer'],
+      requiresNote: true,
+      minNoteLength: 20,
+      description: 'الوحدة الفنية بالوزارة ترجع المطالبة',
+      returnTargets: [
+        { toStatus: 'returned_by_technical',     labelAr: 'المقاول' },
+        { toStatus: 'under_supervisor_review',   labelAr: 'المكتب الهندسي' },
+      ],
+    },
+  ],
+
+  returned_by_technical: [
+    {
+      action: 'resubmit',
+      toStatus: 'under_supervisor_review',
+      allowedRoles: ['contractor'],
+      requiresNote: false,
+      description: 'مقاول يعيد تقديم المطالبة — توجيه مباشر للمكتب الهندسي',
+    },
+  ],
+
+  // ── Stage 3: Quality Unit (وحدة الجودة بالوزارة, 1-day SLA) ───────
+  under_quality_review: [
+    {
+      action: 'approve',
+      toStatus: 'under_project_manager_review',
+      allowedRoles: ['quality'],
+      requiresNote: false,
+      description: 'وحدة الجودة بالوزارة توافق وتحيل لمدير المشروع',
+    },
+    {
+      action: 'return',
+      toStatus: 'returned_by_quality',
+      allowedRoles: ['quality'],
+      requiresNote: true,
+      minNoteLength: 20,
+      description: 'وحدة الجودة بالوزارة ترجع المطالبة',
+      returnTargets: [
+        { toStatus: 'returned_by_quality',       labelAr: 'المقاول' },
+        { toStatus: 'under_supervisor_review',   labelAr: 'المكتب الهندسي' },
+        { toStatus: 'under_technical_review',    labelAr: 'الوحدة الفنية بالوزارة' },
+      ],
+    },
+  ],
+
+  returned_by_quality: [
+    {
+      action: 'resubmit',
+      toStatus: 'under_supervisor_review',
+      allowedRoles: ['contractor'],
+      requiresNote: false,
+      description: 'مقاول يعيد تقديم المطالبة — توجيه مباشر للمكتب الهندسي',
+    },
+  ],
+
+  // ── Stage 4: Project Manager (مدير المشروع, monitoring) ───────────
+  under_project_manager_review: [
+    {
+      action: 'approve',
+      toStatus: 'pending_director_approval',
+      allowedRoles: ['project_manager'],
+      requiresNote: false,
+      description: 'مدير المشروع يوافق ويحيل للاعتماد النهائي',
+    },
+    {
+      action: 'return',
+      toStatus: 'returned_by_project_manager',
+      allowedRoles: ['project_manager'],
+      requiresNote: true,
+      minNoteLength: 20,
+      description: 'مدير المشروع يرجع المطالبة',
+      returnTargets: [
+        { toStatus: 'returned_by_project_manager', labelAr: 'المقاول' },
+        { toStatus: 'under_supervisor_review',     labelAr: 'المكتب الهندسي' },
+        { toStatus: 'under_technical_review',      labelAr: 'الوحدة الفنية بالوزارة' },
+        { toStatus: 'under_quality_review',        labelAr: 'وحدة الجودة بالوزارة' },
+      ],
+    },
+  ],
+
+  returned_by_project_manager: [
+    {
+      action: 'resubmit',
+      toStatus: 'under_supervisor_review',
+      allowedRoles: ['contractor'],
+      requiresNote: false,
+      description: 'مقاول يعيد تقديم المطالبة — توجيه مباشر للمكتب الهندسي',
+    },
+  ],
+
+  // ── LEGACY paths (claims that entered before Migration 046) ───────
+  // New claims do NOT enter these statuses; the supervisor's `approve`
+  // action now routes to under_technical_review instead. These rows
+  // exist so existing claim records can still be processed forward.
   under_auditor_review: [
     {
       action: 'approve',
       toStatus: 'under_reviewer_check',
       allowedRoles: ['auditor'],
       requiresNote: false,
-      description: 'مدقق يوافق على الجوانب التقنية',
+      description: 'مدقق يوافق على الجوانب التقنية (مسار قديم — قبل المرحلة 2.6)',
     },
     {
       action: 'return',
@@ -140,7 +309,10 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
       allowedRoles: ['auditor'],
       requiresNote: true,
       minNoteLength: 20,
-      description: 'مدقق يرجع المطالبة للمقاول',
+      description: 'مدقق يرجع المطالبة للمقاول (مسار قديم)',
+      returnTargets: [
+        { toStatus: 'returned_by_auditor', labelAr: 'المقاول' },
+      ],
     },
   ],
 
@@ -150,7 +322,7 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
       toStatus: 'under_supervisor_review',
       allowedRoles: ['contractor'],
       requiresNote: false,
-      description: 'مقاول يعيد تقديم المطالبة — توجيه مباشر لجهة الإشراف',
+      description: 'مقاول يعيد تقديم المطالبة — توجيه مباشر للمكتب الهندسي',
     },
   ],
 
@@ -160,7 +332,7 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
       toStatus: 'pending_director_approval',
       allowedRoles: ['reviewer'],
       requiresNote: false,
-      description: 'مراجع يؤكد توافق منصة الاعتماد',
+      description: 'مراجع يؤكد توافق منصة الاعتماد (مسار قديم)',
     },
     {
       action: 'return',
@@ -168,23 +340,25 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
       allowedRoles: ['reviewer'],
       requiresNote: true,
       minNoteLength: 20,
-      description: 'مراجع يرجع للمدقق للتصحيح',
+      description: 'مراجع يرجع للمدقق للتصحيح (مسار قديم)',
+      returnTargets: [
+        { toStatus: 'returned_by_auditor', labelAr: 'المدقق' },
+      ],
     },
   ],
 
-  // NOTE: 'director' retains full access. Additional final approvers are checked
+  // ── Stage 5: Final Approval (الاعتماد النهائي) ───────────────────
+  // 'director' retains full access. Additional final approvers are checked
   // dynamically at the API level via the contract_approvers table (migration 040).
   // The allowedRoles here serve as static client-side hints — the real check
   // for non-director final approvers is in /api/claims/transition.
-  // NOTE: 'director' and 'final_approver' both have access here.
-  // final_approver is contract-scoped — API enforces contract_approvers check.
   pending_director_approval: [
     {
       action: 'approve',
       toStatus: 'approved',
       allowedRoles: ['director', 'final_approver'],
       requiresNote: false,
-      description: 'المعتمد النهائي يعتمد المطالبة نهائياً',
+      description: 'الاعتماد النهائي يعتمد المطالبة نهائياً',
     },
     {
       action: 'reject',
@@ -192,18 +366,38 @@ export const CLAIM_TRANSITIONS: Record<ClaimStatus, TransitionDef[]> = {
       allowedRoles: ['director', 'final_approver'],
       requiresNote: true,
       minNoteLength: 20,
-      description: 'المعتمد النهائي يرفض المطالبة',
+      description: 'الاعتماد النهائي يرفض المطالبة',
     },
     {
       action: 'return',
-      toStatus: 'under_auditor_review',
+      // Phase 2.6: default target is the dedicated returned_by_final_approver
+      // sink (NEW), not the legacy under_auditor_review fallback.
+      toStatus: 'returned_by_final_approver',
       allowedRoles: ['director', 'final_approver'],
       requiresNote: true,
       minNoteLength: 20,
-      description: 'المعتمد النهائي يرجع للمدقق للمراجعة الإضافية',
+      description: 'الاعتماد النهائي يرجع المطالبة',
+      returnTargets: [
+        { toStatus: 'returned_by_final_approver',      labelAr: 'المقاول' },
+        { toStatus: 'under_supervisor_review',         labelAr: 'المكتب الهندسي' },
+        { toStatus: 'under_technical_review',          labelAr: 'الوحدة الفنية بالوزارة' },
+        { toStatus: 'under_quality_review',            labelAr: 'وحدة الجودة بالوزارة' },
+        { toStatus: 'under_project_manager_review',    labelAr: 'مدير المشروع' },
+      ],
     },
   ],
 
+  returned_by_final_approver: [
+    {
+      action: 'resubmit',
+      toStatus: 'under_supervisor_review',
+      allowedRoles: ['contractor'],
+      requiresNote: false,
+      description: 'مقاول يعيد تقديم المطالبة — توجيه مباشر للمكتب الهندسي',
+    },
+  ],
+
+  // ── Terminal states ──────────────────────────────────────────────
   approved: [],
   rejected: [],
   cancelled: [],
@@ -322,6 +516,53 @@ export function getNextStatus(currentStatus: ClaimStatus, action: string): Claim
   return transition?.toStatus || null;
 }
 
+// ─── Phase 2.6 — Flexible-return target resolution ────────────────
+
+/**
+ * Resolves the list of allowed `to_status` targets for a flexible-return
+ * action. Used by:
+ *   • the API route (Phase 2.6 commit #7) to validate a picked target
+ *     against an explicit allow-list before persisting the transition;
+ *   • the UI (Phase 2.6 commit #8) to render the target-stage radio
+ *     group in the return modal.
+ *
+ * Behaviour:
+ *   • If the (currentStatus, role) combination has a matching `return`
+ *     transition with explicit `returnTargets`, those are returned
+ *     verbatim (preserving the planner's order — index 0 is always the
+ *     contractor-bound default).
+ *   • If the matching transition has no `returnTargets` (single-target
+ *     legacy return), a synthetic single-element list is returned with
+ *     the legacy `toStatus` and the label "المقاول" — so consumers can
+ *     treat every return uniformly.
+ *   • If no `return` transition exists for the role at this status,
+ *     returns an empty array. The caller must NOT permit a return in
+ *     that case.
+ *
+ * The returned array is a fresh copy — callers may mutate it freely.
+ */
+export function getReturnTargets(
+  currentStatus: ClaimStatus,
+  role: WorkflowRole,
+): Array<{ toStatus: ClaimStatus; labelAr: string }> {
+  const transitions = CLAIM_TRANSITIONS[currentStatus];
+  if (!transitions || transitions.length === 0) return [];
+
+  const ret = transitions.find(
+    (t) => t.action === 'return' && t.allowedRoles.includes(role),
+  );
+  if (!ret) return [];
+
+  if (ret.returnTargets && ret.returnTargets.length > 0) {
+    // Defensive copy so callers can't mutate the source-of-truth list.
+    return ret.returnTargets.map((rt) => ({ ...rt }));
+  }
+
+  // Legacy single-target return — synthesize a contractor-bound entry
+  // using the transition's default toStatus. Keeps the API uniform.
+  return [{ toStatus: ret.toStatus, labelAr: 'المقاول' }];
+}
+
 /**
  * Calculates workflow state based on current status and user role
  */
@@ -363,12 +604,20 @@ export function getStageLabel(status: ClaimStatus): string {
   const labels: Record<ClaimStatus, string> = {
     draft: 'مسودة',
     submitted: 'مُرسَلة',
-    under_supervisor_review: 'مراجعة جهة الإشراف',
-    returned_by_supervisor: 'مُرجَّعة من جهة الإشراف',
-    under_auditor_review: 'مراجعة المدقق',
-    returned_by_auditor: 'مُرجَّعة من المدقق',
-    under_reviewer_check: 'فحص المراجع',
-    pending_director_approval: 'بانتظار اعتماد المدير',
+    under_supervisor_review: 'مراجعة المكتب الهندسي',
+    returned_by_supervisor: 'مُرجَّعة من المكتب الهندسي',
+    under_auditor_review: 'مراجعة المدقق',                         // legacy
+    returned_by_auditor: 'مُرجَّعة من المدقق',                      // legacy
+    under_reviewer_check: 'فحص المراجع',                            // legacy
+    // Phase 2.6 additions — labels match constants.CLAIM_STATUS_LABELS.
+    under_technical_review: 'مراجعة الوحدة الفنية بالوزارة',
+    returned_by_technical: 'مُرجَّعة من الوحدة الفنية بالوزارة',
+    under_quality_review: 'مراجعة وحدة الجودة بالوزارة',
+    returned_by_quality: 'مُرجَّعة من وحدة الجودة بالوزارة',
+    under_project_manager_review: 'مراجعة مدير المشروع',
+    returned_by_project_manager: 'مُرجَّعة من مدير المشروع',
+    returned_by_final_approver: 'مُرجَّعة من الاعتماد النهائي',
+    pending_director_approval: 'بانتظار الاعتماد النهائي',
     approved: 'معتمدة',
     rejected: 'مرفوضة',
     cancelled: 'ملغاة',
@@ -377,17 +626,39 @@ export function getStageLabel(status: ClaimStatus): string {
 }
 
 /**
- * Gets actor role name for current status (who should act next)
+ * Gets actor role name for current status (who should act next).
+ *
+ * Phase 2.6: return type widened to `WorkflowRole | null` so the new
+ * gating roles `quality` and `project_manager` (which are NOT in
+ * UserRole) can be returned. UserRole consumers continue to work via
+ * the structural-subtype rule (UserRole ⊂ WorkflowRole).
  */
-export function getExpectedActorRole(status: ClaimStatus): UserRole | null {
-  const actorMap: Record<ClaimStatus, UserRole | null> = {
+export function getExpectedActorRole(status: ClaimStatus): WorkflowRole | null {
+  const actorMap: Record<ClaimStatus, WorkflowRole | null> = {
     draft: 'contractor',
     submitted: 'supervisor',
     under_supervisor_review: 'supervisor',
     returned_by_supervisor: 'contractor',
-    under_auditor_review: 'auditor',
-    returned_by_auditor: 'contractor',
-    under_reviewer_check: 'reviewer',
+    under_auditor_review: 'auditor',                  // legacy
+    returned_by_auditor: 'contractor',                // legacy
+    under_reviewer_check: 'reviewer',                 // legacy
+    // Phase 2.6 additions. The new gating roles `quality` and
+    // `project_manager` are ContractRole values, not UserRole values, so
+    // they cannot be returned from this helper without widening UserRole.
+    // Until the role-model unification (planned for Phase 2.6 commit #4
+    // / #5), the new under_*_review statuses fall through to null and the
+    // returned_by_* statuses correctly route to 'contractor'.
+    under_technical_review: 'reviewer',
+    returned_by_technical: 'contractor',
+    // Phase 2.6 commit #4 — UserRole now includes 'quality' and
+    // 'project_manager' (Migration 045 ContractRole identifiers
+    // promoted to gating workflow roles), so these statuses can map
+    // directly to their owning role identifier.
+    under_quality_review: 'quality',
+    returned_by_quality: 'contractor',
+    under_project_manager_review: 'project_manager',
+    returned_by_project_manager: 'contractor',
+    returned_by_final_approver: 'contractor',
     pending_director_approval: 'final_approver',
     approved: null,
     rejected: null,
@@ -469,15 +740,21 @@ export function getTransitionErrorMessage(
 }
 
 /**
- * Returns a workflow chain (path to final approval)
+ * Returns a workflow chain (path to final approval).
+ *
+ * Phase 2.6: replaces the legacy auditor/reviewer chain with the new
+ * pipeline. Claims that are still in the legacy `under_auditor_review`
+ * or `under_reviewer_check` status fall back to the chain head — the
+ * helper is a visualisation hint only, so this is acceptable.
  */
 export function getWorkflowChain(currentStatus: ClaimStatus): ClaimStatus[] {
   const chain: ClaimStatus[] = [
     'draft',
     'submitted',
     'under_supervisor_review',
-    'under_auditor_review',
-    'under_reviewer_check',
+    'under_technical_review',
+    'under_quality_review',
+    'under_project_manager_review',
     'pending_director_approval',
     'approved',
   ];
@@ -495,9 +772,18 @@ export function calculateWorkflowProgress(currentStatus: ClaimStatus): number {
     submitted: 14,
     under_supervisor_review: 28,
     returned_by_supervisor: 28,
-    under_auditor_review: 42,
-    returned_by_auditor: 42,
-    under_reviewer_check: 70,
+    under_auditor_review: 42,                  // legacy
+    returned_by_auditor: 42,                    // legacy
+    under_reviewer_check: 70,                   // legacy
+    // Phase 2.6 additions — interleaved into the existing 0-100 scale so
+    // claims in the new pipeline display a sensible progress bar.
+    under_technical_review: 50,
+    returned_by_technical: 50,
+    under_quality_review: 70,
+    returned_by_quality: 70,
+    under_project_manager_review: 80,
+    returned_by_project_manager: 80,
+    returned_by_final_approver: 85,
     pending_director_approval: 85,
     approved: 100,
     rejected: 100,
@@ -515,9 +801,17 @@ export function getStatusColor(status: ClaimStatus): string {
     submitted: '#F59E0B',
     under_supervisor_review: '#06B6D4',
     returned_by_supervisor: '#F97316',
-    under_auditor_review: '#8B5CF6',
-    returned_by_auditor: '#F97316',
-    under_reviewer_check: '#EC4899',
+    under_auditor_review: '#8B5CF6',                  // legacy
+    returned_by_auditor: '#F97316',                    // legacy
+    under_reviewer_check: '#EC4899',                   // legacy
+    // Phase 2.6 additions — palette mirrors sibling stages.
+    under_technical_review: '#8B5CF6',                 // purple, like legacy auditor
+    returned_by_technical: '#F97316',
+    under_quality_review: '#FFC845',                   // gold — pending review
+    returned_by_quality: '#F97316',
+    under_project_manager_review: '#06B6D4',           // teal, like consultant
+    returned_by_project_manager: '#F97316',
+    returned_by_final_approver: '#F97316',
     pending_director_approval: '#FFD700',
     approved: '#87BA26',
     rejected: '#EF4444',

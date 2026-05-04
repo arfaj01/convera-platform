@@ -75,6 +75,16 @@ const STATUS_OWNER_MAP: Record<ClaimStatus, OwnerRole> = {
   under_auditor_review:       'auditor',
   returned_by_auditor:        'contractor',
   under_reviewer_check:       'reviewer',
+  // Phase 2.6 — technical/quality/PM all map to reviewer-tier owners
+  // (quality + PM are ContractRole-only; we expose them as 'reviewer'
+  // here so existing SLA/owner UI keeps working unchanged).
+  under_technical_review:        'reviewer',
+  returned_by_technical:         'contractor',
+  under_quality_review:          'reviewer',
+  returned_by_quality:           'contractor',
+  under_project_manager_review:  'reviewer',
+  returned_by_project_manager:   'contractor',
+  returned_by_final_approver:    'contractor',
   pending_director_approval:  'director',
   approved:                   null,
   rejected:                   null,
@@ -99,6 +109,14 @@ const STAGE_LABELS: Record<ClaimStatus, string> = {
   under_auditor_review:       'قيد مراجعة المدقق',
   returned_by_auditor:        'مُرجَّعة — بانتظار المقاول',
   under_reviewer_check:       'قيد فحص المراجع',
+  // Phase 2.6 — quality / technical / PM / final-approver-return stages.
+  under_technical_review:        'قيد مراجعة الوحدة الفنية بالوزارة',
+  returned_by_technical:         'مُرجَّعة — بانتظار المقاول',
+  under_quality_review:          'قيد مراجعة وحدة الجودة بالوزارة',
+  returned_by_quality:           'مُرجَّعة — بانتظار المقاول',
+  under_project_manager_review:  'قيد مراجعة مدير المشروع',
+  returned_by_project_manager:   'مُرجَّعة — بانتظار المقاول',
+  returned_by_final_approver:    'مُرجَّعة — بانتظار المقاول',
   pending_director_approval:  'بانتظار اعتماد المدير',
   approved:                   'معتمدة',
   rejected:                   'مرفوضة',

@@ -13,11 +13,12 @@
  *    consumes CLAIM_TRANSITIONS internally — same validation chain.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { getAuthHeaders } from '@/lib/supabase';
+import type { ClaimStatus } from '@/lib/types';
 import {
   type ClaimAction,
   type ActionContext,
@@ -41,11 +42,23 @@ export default function WorkflowActions({
   const { showToast } = useToast();
   const [modalAction, setModalAction] = useState<ClaimAction | null>(null);
   const [reason, setReason] = useState('');
+  const [pickedTarget, setPickedTarget] = useState<ClaimStatus | null>(null);
   const [loading, setLoading] = useState(false);
 
   // ─── Single source of truth: action engine ─────────────────────
   const allActions = getAvailableActionsForClaim(actionContext);
   const workflowActions = getWorkflowActions(allActions);
+
+  // Phase 2.6 — when the modal opens with a flexible-return action,
+  // pre-select the contractor-bound default (index 0). For non-return
+  // or single-target actions, pickedTarget stays null.
+  useEffect(() => {
+    if (modalAction?.returnTargets && modalAction.returnTargets.length > 0) {
+      setPickedTarget(modalAction.returnTargets[0].toStatus);
+    } else {
+      setPickedTarget(null);
+    }
+  }, [modalAction]);
 
   if (workflowActions.length === 0) return null;
 
@@ -67,6 +80,11 @@ export default function WorkflowActions({
       // Map canonical field names for return/reject reasons
       if (action.type === 'return') {
         body.returnReason = notes;
+        // Phase 2.6 — flexible-return: forward the picked target.
+        // Server still validates it against the allow-list (commit #7).
+        if (pickedTarget) {
+          body.to_status = pickedTarget;
+        }
       }
       if (action.type === 'reject') {
         body.rejectionReason = notes;
@@ -88,6 +106,7 @@ export default function WorkflowActions({
       showToast('تم تنفيذ الإجراء بنجاح', 'ok');
       setModalAction(null);
       setReason('');
+      setPickedTarget(null);
       onActionComplete();
     } catch (e) {
       showToast(`خطأ: ${(e as Error).message}`, 'error');
@@ -98,6 +117,14 @@ export default function WorkflowActions({
 
   const minLen = modalAction?.min_input_length || 10;
   const isRejectModal = modalAction?.type === 'reject';
+  // Phase 2.6 — confirmation gating for flexible-return:
+  //   (a) a target must be picked (only relevant when returnTargets exists)
+  //   (b) reason length ≥ minLen (server enforces ≥20; UI matches)
+  const hasReturnTargets = !!modalAction?.returnTargets && modalAction.returnTargets.length > 0;
+  const confirmDisabled =
+    loading ||
+    reason.trim().length < minLen ||
+    (hasReturnTargets && !pickedTarget);
 
   return (
     <div className={`flex gap-2 flex-wrap ${loading ? 'pointer-events-none opacity-70' : ''}`}>
@@ -136,29 +163,66 @@ export default function WorkflowActions({
         </div>
       ))}
 
-      {/* Reason Modal — shown for return / reject actions */}
+      {/* Reason / Return-target Modal — shown for return / reject actions */}
       <Modal
         open={!!modalAction}
-        onClose={() => { setModalAction(null); setReason(''); }}
+        onClose={() => { setModalAction(null); setReason(''); setPickedTarget(null); }}
         title={modalAction ? modalAction.label_ar : ''}
         footer={
           <>
             <Button
               variant="outline"
-              onClick={() => { setModalAction(null); setReason(''); }}
+              onClick={() => { setModalAction(null); setReason(''); setPickedTarget(null); }}
             >
               إلغاء
             </Button>
             <Button
               variant={isRejectModal ? 'red' : 'teal'}
               onClick={() => modalAction && handleAction(modalAction, reason)}
-              disabled={loading || reason.trim().length < minLen}
+              disabled={confirmDisabled}
             >
               تأكيد
             </Button>
           </>
         }
       >
+        {/* Phase 2.6 — flexible-return target picker.
+            Renders ONLY when the action carries returnTargets (i.e. a
+            stage with multiple allowed return destinations). Single-target
+            legacy returns and reject actions skip this block. */}
+        {hasReturnTargets && modalAction?.returnTargets && (
+          <div className="mb-4">
+            <label className="block text-xs font-bold text-gray-600 mb-1.5">
+              إرجاع إلى <span className="text-red-500">*</span>
+            </label>
+            <div className="flex flex-col gap-1.5 bg-gray-50 rounded p-2 border border-gray-200">
+              {modalAction.returnTargets.map((target, idx) => (
+                <label
+                  key={target.toStatus}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-white"
+                >
+                  <input
+                    type="radio"
+                    name="return-target"
+                    value={target.toStatus}
+                    checked={pickedTarget === target.toStatus}
+                    onChange={() => setPickedTarget(target.toStatus)}
+                    className="accent-[#045859]"
+                  />
+                  <span className="text-sm font-bold text-gray-700">
+                    {target.labelAr}
+                  </span>
+                  {idx === 0 && (
+                    <span className="text-[0.6rem] text-gray-400 mr-auto">
+                      (الافتراضي)
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         <label className="block text-xs font-bold text-gray-600 mb-1">
           {isRejectModal ? 'سبب الرفض (إلزامي)' : 'سبب الإرجاع (إلزامي)'}
         </label>

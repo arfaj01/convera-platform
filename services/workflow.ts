@@ -118,7 +118,20 @@ export async function performClaimAction(
   actorId: string,
   currentStatus: ClaimStatus,
   newStatus: ClaimStatus,
-  notes?: string
+  notes?: string,
+  /**
+   * Phase 2.6 (commit #8) — flexible-return target.
+   *
+   * For action='return' the caller MAY supply a picked target stage.
+   * It is forwarded to the transition API as `to_status` and validated
+   * server-side against the allow-list (commit #7).
+   *
+   * If omitted on a return action, the API falls back to the
+   * contractor-bound default (returned_by_*). Non-return actions
+   * ignore this parameter — destination always comes from
+   * TransitionDef.toStatus.
+   */
+  pickedTarget?: ClaimStatus,
 ) {
   const headers = await getAuthHeaders();
 
@@ -147,6 +160,7 @@ export async function performClaimAction(
     workflowAction: action,
     actorId,
     path: '/api/claims/transition',
+    pickedTarget,
   });
 
   const body: Record<string, unknown> = {
@@ -159,6 +173,13 @@ export async function performClaimAction(
   // Map notes to the correct field based on action type
   if (action === 'return' || action.includes('return')) {
     body.returnReason = notes || '';
+    // Phase 2.6: forward the picked return target so the API can
+    // validate it against getReturnTargets's allow-list. The server
+    // is the source of truth — if pickedTarget is omitted or invalid,
+    // the API decides the final destination.
+    if (pickedTarget) {
+      body.to_status = pickedTarget;
+    }
   }
   if (action === 'reject') {
     body.rejectionReason = notes || 'مرفوض';

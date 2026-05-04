@@ -13,6 +13,27 @@
 export type UserRole = 'director' | 'admin' | 'reviewer' | 'consultant' | 'contractor' | 'auditor' | 'supervisor' | 'final_approver';
 
 /**
+ * WorkflowRole — the role identifier the claim state-machine uses to
+ * decide who can act on a transition. It is the **union** of:
+ *   • UserRole — global authority on `profiles.role` (director,
+ *     final_approver, etc.).
+ *   • Two ContractRole-only identifiers (`'quality'`, `'project_manager'`)
+ *     that gate the new Phase 2.6 stages but are NOT valid `profiles.role`
+ *     values.
+ *
+ * Architectural rule: WorkflowRole MUST NOT leak into `Record<UserRole, …>`
+ * tables (ROLE_LABELS, ROLE_COLORS, dropdowns, RLS). Those are tied to
+ * the DB enum. WorkflowRole lives only on `TransitionDef.allowedRoles`,
+ * `WorkflowTransition.allowedRoles`, and the role-resolver path that
+ * goes through the action engine's CONTRACT_ROLE_TO_WORKFLOW_ROLE map.
+ *
+ * Defined here (instead of in lib/workflow-engine.ts) so that
+ * `WorkflowTransition` (below) can reference it without forcing a
+ * circular import between types.ts and workflow-engine.ts.
+ */
+export type WorkflowRole = UserRole | 'quality' | 'project_manager';
+
+/**
  * Contract-scoped roles (from user_contract_roles table — migrations 025 + 045).
  * Maps to the contract_role PostgreSQL enum.
  *
@@ -70,18 +91,39 @@ export type ContractStatus = 'draft' | 'active' | 'completed' | 'suspended' | 'c
 export type ContractType = 'consultancy' | 'supervision' | 'construction' | 'supply' | 'design' | 'design_supervision' | 'maintenance';
 
 /**
- * 5-stage claim workflow: contractor → supervisor → auditor → reviewer → director
+ * Claim workflow status. The platform is mid-migration from the original
+ * 5-stage pipeline (contractor → supervisor → auditor → reviewer → director)
+ * to the Phase 2.6 pipeline that adds a mandatory Quality Unit and a
+ * Project Manager monitoring stage:
+ *   contractor → consultant (supervisor) → technical (reviewer) →
+ *   quality → project_manager → final_approver
+ *
  * - draft: Unsaved draft on contractor's device
- * - submitted: Contractor has submitted for approval
- * - under_supervisor_review: Supervisor reviewing (SLA: 3 working days)
- * - returned_by_supervisor: Supervisor returned to contractor
- * - under_auditor_review: Auditor technical review
- * - returned_by_auditor: Auditor returned to contractor
- * - under_reviewer_check: Reviewer checking governance/اعتماد alignment
- * - pending_director_approval: Awaiting director final decision
- * - approved: Director approved, claim is finalized
- * - rejected: Director rejected, claim is closed
- * - cancelled: Contractor cancelled before supervisor action (terminal)
+ * - submitted: Contractor has submitted (transient — auto-routes onward)
+ * - under_supervisor_review: Engineering Consultant reviewing (SLA: 3 wd)
+ * - returned_by_supervisor: Consultant returned to contractor
+ * - under_auditor_review: LEGACY auditor stage (kept for existing claims;
+ *     not part of the new pipeline — financial auditor role only now)
+ * - returned_by_auditor: LEGACY — same caveat
+ * - under_reviewer_check: LEGACY name for the technical/governance stage;
+ *     new claims will land in `under_technical_review` instead.
+ * - under_technical_review: Technical Unit reviewing (SLA: 3 wd) — NEW
+ * - returned_by_technical: Technical Unit returned to contractor — NEW
+ * - under_quality_review: Quality Unit reviewing (SLA: 1 wd) — NEW
+ * - returned_by_quality: Quality Unit returned to contractor — NEW
+ * - under_project_manager_review: PM monitoring (open SLA) — NEW
+ * - returned_by_project_manager: PM returned to contractor — NEW
+ * - pending_director_approval: Awaiting final approval (UI label:
+ *     "بانتظار الاعتماد النهائي")
+ * - returned_by_final_approver: Final Approval returned to contractor — NEW
+ * - approved: Final approver approved, claim is finalized
+ * - rejected: Final approver rejected, claim is closed
+ * - cancelled: Contractor cancelled before any review (terminal)
+ *
+ * NOTE: the 7 NEW values land in this union ahead of Migration 046.
+ * Until Migration 046 is executed, no claim row in the DB can carry these
+ * statuses; the values exist here only so the application layer can be
+ * staged in small commits without breaking tsc.
  */
 export type ClaimStatus =
   | 'draft'
@@ -91,7 +133,14 @@ export type ClaimStatus =
   | 'under_auditor_review'
   | 'returned_by_auditor'
   | 'under_reviewer_check'
+  | 'under_technical_review'
+  | 'returned_by_technical'
+  | 'under_quality_review'
+  | 'returned_by_quality'
+  | 'under_project_manager_review'
+  | 'returned_by_project_manager'
   | 'pending_director_approval'
+  | 'returned_by_final_approver'
   | 'approved'
   | 'rejected'
   | 'cancelled';
@@ -465,7 +514,10 @@ export interface WorkflowTransition {
   action: string;
   fromStatus: ClaimStatus;
   toStatus: ClaimStatus;
-  allowedRoles: UserRole[];
+  // Phase 2.6: widened to WorkflowRole[] so the new gating stages
+  // (Quality Unit, Project Manager) can dispatch correctly. UserRole
+  // values remain assignable because UserRole ⊂ WorkflowRole.
+  allowedRoles: WorkflowRole[];
   requiresNote: boolean;
   minNoteLength?: number;
   description: string;

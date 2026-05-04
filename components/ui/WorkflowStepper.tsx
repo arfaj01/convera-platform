@@ -50,6 +50,16 @@ function deriveStageStates(status: ClaimStatus): {
     under_auditor_review:      { idx: 2, state: 'current' },
     returned_by_auditor:       { idx: 0, state: 'returned' },
     under_reviewer_check:      { idx: 3, state: 'current' },
+    // Phase 2.6 — new stages collapse onto the existing 5-step rail:
+    //   technical/quality/PM reviews all sit at the reviewer bullet (idx 3),
+    //   and any returned_by_* falls back to "returned to contractor" (idx 0).
+    under_technical_review:        { idx: 3, state: 'current' },
+    returned_by_technical:         { idx: 0, state: 'returned' },
+    under_quality_review:          { idx: 3, state: 'current' },
+    returned_by_quality:           { idx: 0, state: 'returned' },
+    under_project_manager_review:  { idx: 3, state: 'current' },
+    returned_by_project_manager:   { idx: 0, state: 'returned' },
+    returned_by_final_approver:    { idx: 0, state: 'returned' },
     pending_director_approval: { idx: 4, state: 'current' },
     approved:                  { idx: 4, state: 'done', terminal: 'approved' },
     rejected:                  { idx: 4, state: 'done', terminal: 'rejected' },

@@ -21,8 +21,13 @@ import { createServerSupabaseFromRequest, createAdminSupabase } from '@/lib/supa
 import { assertContractScope, isGlobalRole, ScopeError } from '@/lib/contract-scope';
 import { resolveContractRole } from '@/lib/contract-permissions';
 import { NextRequest, NextResponse } from 'next/server';
-import type { ClaimStatus, ContractRole, UserRole } from '@/lib/types';
-import { CLAIM_TRANSITIONS, canTransitionByContractRole, contractRoleToWorkflowRole } from '@/lib/workflow-engine';
+import type { ClaimStatus, ContractRole, UserRole, WorkflowRole } from '@/lib/types';
+import {
+  CLAIM_TRANSITIONS,
+  canTransitionByContractRole,
+  contractRoleToWorkflowRole,
+  getReturnTargets,
+} from '@/lib/workflow-engine';
 import {
   resolveNotificationEvent,
   getNotificationsForClaimEvent,
@@ -43,6 +48,22 @@ interface TransitionRequest {
    */
   actorId?: string;
   notes?: string;
+  /**
+   * Phase 2.6 — flexible-return target.
+   *
+   * For action='return' the client MAY send a picked target stage.
+   * The server validates this picked value against the allow-list
+   * produced by getReturnTargets(currentStatus, workflowRole). Any
+   * to_status outside that allow-list is rejected with HTTP 422.
+   *
+   * If omitted on a return action, the server defaults to the
+   * contractor-bound target (allowedTargets[0]) — preserving legacy
+   * single-target behaviour for clients that pre-date the picker UI.
+   *
+   * For non-return actions this field is IGNORED — the destination
+   * always comes from the matched TransitionDef.toStatus.
+   */
+  to_status?: ClaimStatus;
 }
 
 interface TransitionResponse {
@@ -65,12 +86,15 @@ function successResponse(data: TransitionResponse['data']): NextResponse<Transit
 // ─── Helper Functions ────────────────────────────────────────────
 
 /**
- * Validate transition is allowed for current status
+ * Validate transition is allowed for current status.
+ *
+ * Phase 2.6: parameter widened to WorkflowRole so quality / project_manager
+ * dispatch correctly. UserRole values still pass (UserRole ⊂ WorkflowRole).
  */
 function isTransitionAllowed(
   currentStatus: ClaimStatus,
   action: string,
-  userRole: UserRole,
+  userRole: WorkflowRole,
 ): { allowed: boolean; toStatus?: ClaimStatus; error?: string } {
   const transitions = CLAIM_TRANSITIONS[currentStatus];
 
@@ -92,6 +116,31 @@ function isTransitionAllowed(
   }
 
   return { allowed: true, toStatus: transition.toStatus };
+}
+
+/**
+ * Local quality / project_manager bridge.
+ *
+ * `lib/workflow-engine.ts::contractRoleToWorkflowRole` still returns
+ * null for `quality` / `project_manager` (it predates Migration 045's
+ * promotion of those values to gating roles, and a workflow-engine
+ * edit is out of scope for Phase 2.6 commit #7). This local helper
+ * recognises the two values and returns the matching WorkflowRole;
+ * everything else falls through to the workflow-engine's resolver.
+ *
+ * Architectural note: `lib/action-engine.ts` already has the correct
+ * map (Phase 2.6 commit #5), but its resolver is module-private. We
+ * intentionally don't import it from action-engine — that file is
+ * locked for this commit, and a single 2-line bridge here costs less
+ * than restructuring the export surface.
+ */
+function resolveActorWorkflowRole(
+  contractRole: ContractRole | null,
+): WorkflowRole | null {
+  if (contractRole === 'quality') return 'quality';
+  if (contractRole === 'project_manager') return 'project_manager';
+  if (!contractRole) return null;
+  return contractRoleToWorkflowRole(contractRole);
 }
 
 /**
@@ -196,6 +245,40 @@ async function getNotificationRecipients(
       .eq('contract_role', 'reviewer')
       .eq('is_active', true);
     if (reviewers) recipients.push(...reviewers.map((r: { user_id: string }) => r.user_id));
+  }
+
+  // ── Phase 2.6 — recipients for the 3 new gating stages ─────────────
+  if (toStatus === 'under_technical_review') {
+    // Technical Unit = ContractRole 'reviewer' on the new pipeline.
+    const { data: technical } = await adminClient
+      .from('user_contract_roles')
+      .select('user_id')
+      .eq('contract_id', claim.contract_id)
+      .eq('contract_role', 'reviewer')
+      .eq('is_active', true);
+    if (technical) recipients.push(...technical.map((r: { user_id: string }) => r.user_id));
+  }
+
+  if (toStatus === 'under_quality_review') {
+    // Quality Unit = ContractRole 'quality' (Migration 045 + commit #5).
+    const { data: quality } = await adminClient
+      .from('user_contract_roles')
+      .select('user_id')
+      .eq('contract_id', claim.contract_id)
+      .eq('contract_role', 'quality')
+      .eq('is_active', true);
+    if (quality) recipients.push(...quality.map((r: { user_id: string }) => r.user_id));
+  }
+
+  if (toStatus === 'under_project_manager_review') {
+    // Project Manager = ContractRole 'project_manager'.
+    const { data: pms } = await adminClient
+      .from('user_contract_roles')
+      .select('user_id')
+      .eq('contract_id', claim.contract_id)
+      .eq('contract_role', 'project_manager')
+      .eq('is_active', true);
+    if (pms) recipients.push(...pms.map((r: { user_id: string }) => r.user_id));
   }
 
   if (toStatus === 'pending_director_approval') {
@@ -372,8 +455,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transitio
         }
       }
     } else if (contractRole && roleSource !== 'global_role') {
-      // Use contract-scoped role for transition check
-      const workflowRole = contractRoleToWorkflowRole(contractRole);
+      // Use contract-scoped role for transition check.
+      // Phase 2.6 (commit #7): quality / project_manager are routed
+      // via the local bridge — workflow-engine's resolver still
+      // returns null for them (untouched in this commit).
+      const workflowRole = resolveActorWorkflowRole(contractRole);
       if (!workflowRole) {
         return errorResponse(`الدور "${contractRole}" لا يملك صلاحيات تنفيذ إجراءات سير العمل`, 403);
       }
@@ -397,6 +483,99 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transitio
 
     if (!allowed || !toStatus) {
       return errorResponse(transitionErr || 'انتقال غير صالح', 403);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // Step 5c — Phase 2.6: flexible-return server-side validation
+    // ════════════════════════════════════════════════════════════════
+    //
+    // For action='return', the server enforces TWO rules independently
+    // of any frontend validation:
+    //
+    //   1. The return reason MUST be ≥ 20 trimmed characters
+    //      (matches TransitionDef.minNoteLength=20 in CLAIM_TRANSITIONS).
+    //
+    //   2. If the client supplies `to_status` in the body, that value
+    //      MUST appear in the allow-list returned by
+    //      getReturnTargets(currentStatus, workflowRole). The allow-list
+    //      is the authoritative source of which earlier stages a
+    //      reviewer may pick (see lib/workflow-engine.ts §3d table).
+    //
+    // Threat model: an attacker controlling the client could otherwise
+    // submit `to_status: 'approved'` or jump the claim to an arbitrary
+    // earlier stage. Both rules MUST be enforced server-side, never
+    // delegated to the UI.
+    //
+    // Failure responses use HTTP 422 (Unprocessable Entity) so callers
+    // can distinguish business-rule violations from auth (401/403),
+    // missing claim (404), or generic bad input (400).
+    if (action === 'return') {
+      // 5c-i: enforce note minimum (server-side, not UI-only)
+      const noteText = (returnReason ?? notes ?? '').trim();
+      if (noteText.length < 20) {
+        return errorResponse(
+          'سبب الإرجاع إلزامي ولا يقل عن ٢٠ حرفًا',
+          422,
+        );
+      }
+
+      // 5c-ii: resolve the actor's WorkflowRole for the allow-list query.
+      // Falls back to the legacy alias (consultant→supervisor, admin→auditor)
+      // when no contract role is held — mirrors the dispatch logic above.
+      let actorWorkflowRole: WorkflowRole | null = null;
+      if (contractRole && roleSource !== 'global_role') {
+        actorWorkflowRole = resolveActorWorkflowRole(contractRole);
+      } else {
+        const LEGACY_MAP: Partial<Record<UserRole, UserRole>> = {
+          consultant: 'supervisor',
+          admin: 'auditor',
+        };
+        actorWorkflowRole = (LEGACY_MAP[userRole] || userRole) as WorkflowRole;
+      }
+
+      if (!actorWorkflowRole) {
+        return errorResponse(
+          'تعذّر تحديد دور المستخدم لإجراء الإرجاع',
+          403,
+        );
+      }
+
+      // 5c-iii: build allow-list of permitted return targets.
+      const allowedTargets = getReturnTargets(claim.status, actorWorkflowRole);
+      if (allowedTargets.length === 0) {
+        return errorResponse(
+          'لا توجد أهداف إرجاع متاحة لدورك في هذه المرحلة',
+          422,
+        );
+      }
+
+      // 5c-iv: validate / pick the destination.
+      // body.to_status is ClaimStatus | undefined per the interface;
+      // null isn't in the type but defend against malformed JSON.
+      const requestedTarget: ClaimStatus | null | undefined = body.to_status;
+      if (requestedTarget) {
+        const isAllowed = allowedTargets.some((t) => t.toStatus === requestedTarget);
+        if (!isAllowed) {
+          console.warn(
+            `[claims/transition] flexible-return REJECTED: actor=${actorId} ` +
+            `from=${claim.status} role=${actorWorkflowRole} ` +
+            `requested=${requestedTarget} allowed=[${allowedTargets.map((t) => t.toStatus).join(',')}]`,
+          );
+          return errorResponse(
+            'لا يمكن الإرجاع إلى المرحلة المحددة',
+            422,
+          );
+        }
+        // Override the default toStatus (from TransitionDef) with the
+        // validated picked target. Subsequent steps (UPDATE, audit log,
+        // notifications) operate on this final value.
+        toStatus = requestedTarget;
+      } else {
+        // No picked target → use the contractor-bound default
+        // (allowedTargets[0] is the contractor target by convention in
+        // workflow-engine's CLAIM_TRANSITIONS).
+        toStatus = allowedTargets[0].toStatus;
+      }
     }
 
     // Step 5b: For resubmit actions that route to supervisor, verify supervisor exists

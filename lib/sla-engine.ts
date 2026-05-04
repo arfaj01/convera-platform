@@ -1,11 +1,18 @@
 /**
  * CONVERA SLA Engine — Per-stage timers, escalation, and analytics
  *
- * SLA rules per CLAUDE.md Section 0.2 & Rule G4:
- *   - Supervisor stage: 3 working days MAX
- *     • Day 2: warn Supervisor + Auditor + Reviewer
- *     • Day 3: escalate to Director (breach)
- *   - Other stages: 7 calendar days (configurable)
+ * SLA rules (Phase 2.6 commit #6 — driven by SLA_PER_STAGE_MAP in
+ * lib/constants.ts, the single source of truth):
+ *   - under_supervisor_review (Engineering Consultant):  3 wd, warn at 2
+ *   - under_technical_review  (Technical Unit):          3 wd, warn at 2
+ *   - under_quality_review    (Quality Unit):            1 wd (same-day)
+ *   - under_project_manager_review:                       NO SLA — skipped
+ *   - pending_director_approval:                          3 wd default
+ *   - Legacy under_auditor_review / under_reviewer_check: 5 wd
+ *
+ * Stages without an entry in SLA_PER_STAGE_MAP are NOT tracked. The
+ * default 7-working-day fallback (DEFAULT_SLA below) only applies if
+ * an unknown status is passed (defensive).
  *
  * This module is used both server-side (API routes, scheduled jobs)
  * and client-side (dashboard display).
@@ -56,39 +63,53 @@ export interface StageTime {
 
 // ─── SLA Configuration ───────────────────────────────────────────
 
-const SLA_CONFIG: Record<string, ClaimStageSLA> = {
-  under_supervisor_review: {
-    stage:           'under_supervisor_review',
-    slaWorkingDays:  3,
-    warnAtDays:      2,
-    escalateAtDays:  3,
-  },
-  under_auditor_review: {
-    stage:           'under_auditor_review',
-    slaWorkingDays:  5,
-    warnAtDays:      4,
-    escalateAtDays:  5,
-  },
-  under_reviewer_check: {
-    stage:           'under_reviewer_check',
-    slaWorkingDays:  5,
-    warnAtDays:      4,
-    escalateAtDays:  5,
-  },
-  pending_director_approval: {
-    stage:           'pending_director_approval',
-    slaWorkingDays:  3,
-    warnAtDays:      2,
-    escalateAtDays:  3,
-  },
-};
+import { SLA_PER_STAGE_MAP, type StageSLA } from './constants';
+import type { ClaimStatus } from './types';
 
-// Default SLA for stages not in the table above
+/**
+ * Build the engine-shaped config from the canonical per-stage map.
+ * Phase 2.6: SLA_PER_STAGE_MAP in lib/constants.ts is the single
+ * source of truth; this local table simply reshapes its entries
+ * into ClaimStageSLA (with `stage`, `slaWorkingDays`, `warnAtDays`,
+ * `escalateAtDays`) for backward compatibility with the existing
+ * calculateSLA / computeWorkflowAnalytics API.
+ *
+ * Stages absent from SLA_PER_STAGE_MAP (e.g.
+ * `under_project_manager_review`) get NO entry here — `getStageSLA`
+ * returns null for them, and `calculateSLA` then short-circuits
+ * with `status: 'on_track'` (no warning, no breach).
+ */
+const SLA_CONFIG: Record<string, ClaimStageSLA> = (() => {
+  const out: Record<string, ClaimStageSLA> = {};
+  for (const stage of Object.keys(SLA_PER_STAGE_MAP) as ClaimStatus[]) {
+    const sla: StageSLA | undefined = SLA_PER_STAGE_MAP[stage];
+    if (!sla) continue;
+    out[stage] = {
+      stage,
+      slaWorkingDays:  sla.breachDays,
+      warnAtDays:      sla.warningDays,
+      escalateAtDays:  sla.breachDays,
+    };
+  }
+  return out;
+})();
+
+/**
+ * Defensive fallback for unknown stages. New tracked stages should be
+ * added to SLA_PER_STAGE_MAP, NOT propagated here. Stages that are
+ * intentionally untracked (project_manager) bypass calculateSLA entirely
+ * via the `untracked` early-return below — they never hit this default.
+ */
 const DEFAULT_SLA: Omit<ClaimStageSLA, 'stage'> = {
   slaWorkingDays:  7,
   warnAtDays:      5,
   escalateAtDays:  7,
 };
+
+/** Returns true if the stage has an SLA entry in SLA_PER_STAGE_MAP. */
+export function isStageSLATracked(stage: string): boolean {
+  return Object.prototype.hasOwnProperty.call(SLA_CONFIG, stage);
+}
 
 // ─── Working Day Calculator ───────────────────────────────────────
 
@@ -129,7 +150,15 @@ function addWorkingDays(from: Date, days: number): Date {
 // ─── Core SLA Calculator ──────────────────────────────────────────
 
 /**
- * Calculate SLA status for a claim in a given stage
+ * Calculate SLA status for a claim in a given stage.
+ *
+ * Phase 2.6 (commit #6): stages absent from SLA_PER_STAGE_MAP (e.g.
+ * `under_project_manager_review`) are treated as untracked — the
+ * function still returns an SLAResult so callers don't need to
+ * special-case them, but the `status` is forced to `'on_track'`,
+ * `slaWorkingDays` carries the defensive default (7), and
+ * `percentageUsed` stays at 0. UI surfaces should hide the SLA badge
+ * for untracked stages (use `isStageSLATracked` to gate display).
  *
  * @param stage - Current claim status
  * @param enteredAt - When the claim entered this stage
@@ -140,7 +169,10 @@ export function calculateSLA(
   enteredAt: Date,
   now: Date = new Date(),
 ): SLAResult {
-  const config = SLA_CONFIG[stage] ?? { stage, ...DEFAULT_SLA };
+  const tracked = isStageSLATracked(stage);
+  const config = tracked
+    ? SLA_CONFIG[stage]
+    : { stage, ...DEFAULT_SLA };
 
   const workingDaysElapsed   = countWorkingDays(enteredAt, now);
   const calendarDaysElapsed  = Math.floor((now.getTime() - enteredAt.getTime()) / (1000 * 60 * 60 * 24));
@@ -150,11 +182,15 @@ export function calculateSLA(
 
   const msRemaining    = breachAt.getTime() - now.getTime();
   const hoursRemaining = Math.max(0, msRemaining / (1000 * 60 * 60));
-  const percentageUsed = Math.min(100, (workingDaysElapsed / config.slaWorkingDays) * 100);
+  const percentageUsed = tracked
+    ? Math.min(100, (workingDaysElapsed / config.slaWorkingDays) * 100)
+    : 0;
 
   let status: SLAStatus = 'on_track';
-  if (workingDaysElapsed >= config.escalateAtDays) status = 'breached';
-  else if (workingDaysElapsed >= config.warnAtDays)  status = 'warning';
+  if (tracked) {
+    if (workingDaysElapsed >= config.escalateAtDays) status = 'breached';
+    else if (workingDaysElapsed >= config.warnAtDays) status = 'warning';
+  }
 
   return {
     stage,
@@ -197,8 +233,13 @@ export function computeWorkflowAnalytics(
       ? countWorkingDays(enteredAt, exitedAt)
       : countWorkingDays(enteredAt, new Date());
 
-    const config  = SLA_CONFIG[row.to_status] ?? { stage: row.to_status, ...DEFAULT_SLA };
-    const breached = daysSpent >= config.slaWorkingDays;
+    // Phase 2.6: untracked stages (e.g. under_project_manager_review)
+    // never count as breached — they have no SLA threshold.
+    const tracked = isStageSLATracked(row.to_status);
+    const config  = tracked
+      ? SLA_CONFIG[row.to_status]
+      : { stage: row.to_status, ...DEFAULT_SLA };
+    const breached = tracked && daysSpent >= config.slaWorkingDays;
 
     stageBreakdown.push({
       stage:     row.to_status,

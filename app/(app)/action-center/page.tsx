@@ -16,7 +16,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { getAuthHeaders } from '@/lib/supabase';
-import type { ActionItem, ActionPriority, ActionCategory } from '@/lib/action-center-service';
+import type { ActionItem, ActionPriority, ActionCategory, StageSummary } from '@/lib/action-center-service';
 import { getWorkflowActions, getBusinessActions } from '@/lib/action-engine';
 import FilterBar, { type FilterItem } from '@/components/ui/FilterBar';
 import EmptyState from '@/components/ui/EmptyState';
@@ -194,6 +194,76 @@ function AcKpiCard({ label, value, icon: Icon, accentColor, isActive, onClick }:
         {value}
       </div>
       <div className="text-[0.65rem] font-bold text-gray-500 leading-tight">{label}</div>
+    </div>
+  );
+}
+
+// ─── Phase 2.6 — Stage Pipeline Card ─────────────────────────────
+
+/**
+ * Per-stage summary card showing in-flight count + SLA limit.
+ * Renders in a horizontal strip just under the KPI row so the user
+ * gets a glance of "where claims are stuck right now" across the
+ * 5-stage pipeline.
+ */
+const STAGE_KIND_THEME: Record<StageSummary['kind'], { color: string; bg: string; border: string; icon: LucideIcon }> = {
+  consultant: { color: '#045859', bg: '#E8F4F4', border: '#A7D5D5', icon: FileText      },
+  technical:  { color: '#502C7C', bg: '#EDE7F6', border: '#C5B8E0', icon: Search        },
+  quality:    { color: '#C46A00', bg: '#FFF8E0', border: '#F5C97A', icon: ShieldAlert   },
+  pm:         { color: '#00796B', bg: '#E0F4F3', border: '#A7DDD5', icon: BarChart3     },
+  final:      { color: '#045859', bg: '#E8F4F4', border: '#A7D5D5', icon: CheckCircle2  },
+  legacy:     { color: '#54565B', bg: '#F5F5F5', border: '#D0D0D0', icon: ListChecks    },
+};
+
+interface StageCardProps {
+  stage: StageSummary;
+}
+
+function StageCard({ stage }: StageCardProps) {
+  const theme = STAGE_KIND_THEME[stage.kind];
+  const Icon = theme.icon;
+  // Untracked SLA (PM) vs tracked stages.
+  const slaLabel = stage.slaDays === null
+    ? 'بدون مهلة — مراقبة فقط'
+    : `المهلة: ${stage.slaDays} يوم عمل`;
+  const hasOverdue = stage.overdueCount > 0;
+
+  return (
+    <div
+      className="bg-white rounded-xl p-3 flex flex-col gap-1.5 border"
+      style={{
+        borderColor:      theme.border,
+        borderRightWidth: 4,
+        borderRightColor: theme.color,
+      }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Icon size={14} strokeWidth={2.4} style={{ color: theme.color }} />
+          <span className="text-[0.68rem] font-bold text-gray-700 truncate">
+            {stage.labelAr}
+          </span>
+        </div>
+        {hasOverdue && (
+          <span
+            className="inline-flex items-center gap-0.5 text-[0.55rem] font-black px-1.5 py-0.5 rounded-full text-white whitespace-nowrap"
+            style={{ background: '#DC2626' }}
+            title={`${stage.overdueCount} مطالبة تجاوزت المهلة`}
+          >
+            <AlertTriangle size={9} strokeWidth={2.6} />
+            {stage.overdueCount}
+          </span>
+        )}
+      </div>
+      <div
+        className="text-2xl font-black leading-none tabular-nums"
+        style={{ color: theme.color }}
+      >
+        {stage.count}
+      </div>
+      <div className="text-[0.6rem] font-bold text-gray-500 leading-tight">
+        {slaLabel}
+      </div>
     </div>
   );
 }
@@ -534,6 +604,7 @@ export default function ActionCenterPage() {
     totalCritical: 0, totalHigh: 0, totalMedium: 0, totalLow: 0,
     totalOverdue: 0, totalMine: 0,
   });
+  const [byStage,     setByStage]     = useState<StageSummary[]>([]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
@@ -561,6 +632,7 @@ export default function ActionCenterPage() {
         totalOverdue:  d.totalOverdue  ?? 0,
         totalMine:     d.totalMine     ?? 0,
       });
+      setByStage(d.byStage ?? []);
       setGeneratedAt(d.generatedAt ?? null);
     } catch (e) {
       console.error('ActionCenter error:', e);
@@ -767,6 +839,26 @@ export default function ActionCenterPage() {
           onClick={() => setActiveFilter('all')}
         />
       </div>
+
+      {/* ── Phase 2.6 — Stage Pipeline Strip ─────────────────────────
+          Per-stage in-flight counts + SLA limits across the 5 gating
+          stages of the new pipeline. Hidden when the platform has no
+          claims at all (empty deployment). Each card shows count,
+          SLA limit, and a red badge if any claim at that stage has
+          breached SLA. */}
+      {byStage.length > 0 && byStage.some((s) => s.count > 0) && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-[0.68rem] text-gray-500">
+            <span className="font-black text-gray-700">المراحل النشطة</span>
+            <span className="text-gray-400">— مطالبات بانتظار اتخاذ إجراء على كل مرحلة</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+            {byStage.map((s) => (
+              <StageCard key={s.status} stage={s} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Empty / Healthy state ────────────────────────────────── */}
       {totalItems === 0 && !loading && (

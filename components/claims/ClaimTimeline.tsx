@@ -81,13 +81,45 @@ export default function ClaimTimeline({
   function getRoleLabel(role: string | null): string {
     if (!role) return '';
     const labels: Record<string, string> = {
-      contractor: 'المقاول',
-      supervisor: 'جهة الإشراف',
-      auditor:    'المدقق',
-      reviewer:   'المراجع',
-      director:   'المدير',
+      contractor:       'المقاول',
+      supervisor:       'المكتب الهندسي',
+      auditor:          'المدقق',
+      reviewer:         'الوحدة الفنية بالوزارة',
+      // Phase 2.6 — workflow-gating roles surfaced from WorkflowRole.
+      quality:          'وحدة الجودة بالوزارة',
+      project_manager:  'مدير المشروع',
+      director:         'المدير',
+      final_approver:   'الاعتماد النهائي',
     };
     return labels[role] || role;
+  }
+
+  /**
+   * Phase 2.6 — short, human-friendly stage name for the
+   * "أُرجِعت إلى" pill on return events. Maps each `under_*_review`
+   * (the destination of a flexible-return that targets an earlier
+   * review stage) and each `returned_by_*` (the destination of a
+   * return-to-contractor) to a single Arabic phrase.
+   */
+  function getReturnTargetLabel(toStatus: ClaimStatus | string | null): string {
+    if (!toStatus) return '';
+    const labels: Record<string, string> = {
+      // Return-to-contractor sinks
+      returned_by_supervisor:       'المقاول',
+      returned_by_auditor:          'المقاول',
+      returned_by_technical:        'المقاول',
+      returned_by_quality:          'المقاول',
+      returned_by_project_manager:  'المقاول',
+      returned_by_final_approver:   'المقاول',
+      // Return-to-earlier-review-stage destinations
+      under_supervisor_review:      'المكتب الهندسي',
+      under_auditor_review:         'المدقق',
+      under_reviewer_check:         'المراجع',
+      under_technical_review:       'الوحدة الفنية بالوزارة',
+      under_quality_review:         'وحدة الجودة بالوزارة',
+      under_project_manager_review: 'مدير المشروع',
+    };
+    return labels[toStatus] || getStageLabel(toStatus as ClaimStatus);
   }
 
   const expectedRole = currentStatus ? getExpectedActorRole(currentStatus) : null;
@@ -186,6 +218,16 @@ export default function ClaimTimeline({
                       </span>
                     )}
                   </div>
+                  {/* Phase 2.6 — flexible-return: render the picked
+                      target stage prominently so auditors and the
+                      contractor immediately see WHERE the claim went. */}
+                  {w.action === 'return' && w.to_status && (
+                    <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[0.65rem] font-bold text-[#C46A00] bg-[#FEF3E2] px-2 py-0.5 rounded-full border border-[#FED7AA]">
+                        أُرجِعت إلى: {getReturnTargetLabel(w.to_status)}
+                      </span>
+                    </div>
+                  )}
                   <div className="text-[0.69rem] text-gray-400 mt-px">
                     {fmtDateTime(w.created_at)}
                   </div>

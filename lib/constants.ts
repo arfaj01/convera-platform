@@ -61,18 +61,28 @@ export const COLOR_TOKENS = {
 // ─── Claim Status Labels (Arabic) ────────────────────────────────
 
 /**
- * 5-Stage Workflow Status Labels
- * Arabic labels for all claim states
+ * Workflow Status Labels (Arabic). Includes the 7 new Phase 2.6 stages
+ * landed ahead of Migration 046 — labels follow the canonical role names:
+ * المكتب الهندسي / الوحدة الفنية بالوزارة / وحدة الجودة بالوزارة /
+ * مدير المشروع / الاعتماد النهائي.
  */
 export const CLAIM_STATUS_LABELS: Record<ClaimStatus, string> = {
   draft: 'مسودة',
   submitted: 'مُرسَلة',
-  under_supervisor_review: 'مراجعة جهة الإشراف',
-  returned_by_supervisor: 'مُرجَّعة من جهة الإشراف',
-  under_auditor_review: 'مراجعة المدقق',
-  returned_by_auditor: 'مُرجَّعة من المدقق',
-  under_reviewer_check: 'فحص المراجع',
-  pending_director_approval: 'بانتظار اعتماد المدير',
+  under_supervisor_review: 'مراجعة المكتب الهندسي',
+  returned_by_supervisor: 'مُرجَّعة من المكتب الهندسي',
+  under_auditor_review: 'مراجعة المدقق',                       // legacy
+  returned_by_auditor: 'مُرجَّعة من المدقق',                    // legacy
+  under_reviewer_check: 'فحص المراجع',                           // legacy
+  // Phase 2.6 additions — present in the type union ahead of Migration 046.
+  under_technical_review: 'مراجعة الوحدة الفنية بالوزارة',
+  returned_by_technical: 'مُرجَّعة من الوحدة الفنية بالوزارة',
+  under_quality_review: 'مراجعة وحدة الجودة بالوزارة',
+  returned_by_quality: 'مُرجَّعة من وحدة الجودة بالوزارة',
+  under_project_manager_review: 'مراجعة مدير المشروع',
+  returned_by_project_manager: 'مُرجَّعة من مدير المشروع',
+  returned_by_final_approver: 'مُرجَّعة من الاعتماد النهائي',
+  pending_director_approval: 'بانتظار الاعتماد النهائي',
   approved: 'معتمدة',
   rejected: 'مرفوضة',
   cancelled: 'ملغاة',
@@ -127,6 +137,44 @@ export const CLAIM_STATUS_COLORS: Record<
     bg: COLOR_TOKENS.warningPale,
     text: MOMAH_COLORS.gold,
     border: MOMAH_COLORS.gold,
+  },
+  // Phase 2.6 additions — colours mirror sibling stages so that any code
+  // path that lands on these statuses while Migration 046 is still pending
+  // renders consistently with the existing palette.
+  under_technical_review: {
+    bg: '#F3E5FF',
+    text: MOMAH_COLORS.purple,
+    border: MOMAH_COLORS.purple,
+  },
+  returned_by_technical: {
+    bg: COLOR_TOKENS.dangerPale,
+    text: MOMAH_COLORS.orange,
+    border: MOMAH_COLORS.orange,
+  },
+  under_quality_review: {
+    bg: COLOR_TOKENS.warningPale,
+    text: MOMAH_COLORS.gold,
+    border: MOMAH_COLORS.gold,
+  },
+  returned_by_quality: {
+    bg: COLOR_TOKENS.dangerPale,
+    text: MOMAH_COLORS.orange,
+    border: MOMAH_COLORS.orange,
+  },
+  under_project_manager_review: {
+    bg: COLOR_TOKENS.infoPale,
+    text: MOMAH_COLORS.teal,
+    border: MOMAH_COLORS.teal,
+  },
+  returned_by_project_manager: {
+    bg: COLOR_TOKENS.dangerPale,
+    text: MOMAH_COLORS.orange,
+    border: MOMAH_COLORS.orange,
+  },
+  returned_by_final_approver: {
+    bg: COLOR_TOKENS.dangerPale,
+    text: MOMAH_COLORS.orange,
+    border: MOMAH_COLORS.orange,
   },
   approved: {
     bg: COLOR_TOKENS.successPale,
@@ -414,14 +462,49 @@ export const NAV_ITEMS: NavItem[] = [
 // ─── SLA & Governance Constants ─────────────────────────────────
 
 /**
- * Supervisor review SLA: 3 working days maximum
- * Day 2: Warning notification sent
- * Day 3: Escalation notification + flag as breached
+ * Per-stage SLA threshold descriptor (working days, Saudi calendar —
+ * Sun–Thu working week; Fri+Sat are weekends).
+ *
+ * Phase 2.6 (commit #6): replaces the old supervisor-only constants
+ * (SLA_SUPERVISOR_WARNING_DAYS / _BREACH_DAYS) with this map.
  */
-export const SLA_SUPERVISOR_WARNING_DAYS = 2;
-export const SLA_SUPERVISOR_BREACH_DAYS = 3;
-export const SLA_SUPERVISOR_WARNING_HOURS = SLA_SUPERVISOR_WARNING_DAYS * 24;
-export const SLA_SUPERVISOR_BREACH_HOURS = SLA_SUPERVISOR_BREACH_DAYS * 24;
+export interface StageSLA {
+  /** Working days at which the warning notification is triggered */
+  warningDays: number;
+  /** Working days at which the SLA is breached / escalated */
+  breachDays: number;
+}
+
+/**
+ * SLA thresholds keyed by ClaimStatus.
+ *
+ * Stages NOT present in this map are intentionally untracked (e.g.
+ * `under_project_manager_review` is a monitoring/escalation stage with
+ * no breach deadline per upgrade plan §4). `assessClaimSLA` and the
+ * dashboard summary skip such claims rather than emitting a default.
+ *
+ * Notes per stage:
+ *   • supervisor / technical: 3 working days, warn at day 2
+ *     (matches the current MoMaH operational standard).
+ *   • quality: 1 working day — same-day SLA per the upgraded plan
+ *     (warn and breach on the same day, end-of-working-day).
+ *   • project_manager: omitted on purpose — monitoring only.
+ *   • pending_director_approval: 3 working days as a default; the plan
+ *     allows per-contract overrides in a future iteration. The map
+ *     value here is the platform-wide fallback.
+ *   • Legacy stages (auditor / reviewer): kept for in-flight claims
+ *     that entered the pipeline before Migration 046.
+ */
+export const SLA_PER_STAGE_MAP: Partial<Record<ClaimStatus, StageSLA>> = {
+  under_supervisor_review:    { warningDays: 2, breachDays: 3 },
+  under_technical_review:     { warningDays: 2, breachDays: 3 },
+  under_quality_review:       { warningDays: 1, breachDays: 1 },
+  // under_project_manager_review intentionally omitted — no SLA.
+  pending_director_approval:  { warningDays: 2, breachDays: 3 },
+  // Legacy paths (pre-Migration-046):
+  under_auditor_review:       { warningDays: 4, breachDays: 5 },
+  under_reviewer_check:       { warningDays: 4, breachDays: 5 },
+};
 
 /**
  * Change order limit: 10% of contract base value

@@ -6,15 +6,25 @@
  * CRITICAL RULE: Only escalate IF getAvailableActionsForClaim() returns
  * actionable items for the target recipient. No phantom escalations.
  *
- * SLA Rules (per stage):
- *   - Supervisor review:    3 working days  (warning at 70%, overdue at 100%)
- *   - Auditor review:       5 working days  (warning at 70%, overdue at 100%)
- *   - Reviewer check:       5 working days  (warning at 70%, overdue at 100%)
- *   - Director approval:    3 working days  (warning at 70%, overdue at 100%)
+ * SLA Rules (Phase 2.6 commit #6 — derived from SLA_PER_STAGE_MAP in
+ * lib/constants.ts, the single source of truth):
+ *   - Engineering Consultant (under_supervisor_review):  3 wd
+ *   - Technical Unit         (under_technical_review):    3 wd
+ *   - Quality Unit           (under_quality_review):      1 wd  (same-day)
+ *   - Project Manager        (under_project_manager_review):  NO SLA — skipped
+ *   - Final Approval         (pending_director_approval): 3 wd default
+ *   - Legacy auditor / reviewer:                          5 wd
  *
  * Behavior:
- *   - Warning (70%):  notify current owner
- *   - Overdue (100%): notify current owner + director
+ *   - Warning (70% of breachDays):  notify current owner
+ *   - Overdue (100% of breachDays): notify current owner + director
+ *   - PM stage:                     no SLA tracking, no notifications
+ *
+ * Notifications include the current `status` and `expectedRole`
+ * (WorkflowRole) on every payload, so notification-engine and
+ * downstream templates can branch per stage (e.g. quality-specific
+ * 1-day-SLA copy vs supervisor 3-day copy) without further changes
+ * here.
  *
  * Does NOT:
  *   - Send notifications directly (returns payloads via notification-engine)
@@ -29,8 +39,13 @@ import {
   type NotificationClaimContext,
   type RecipientContext,
 } from './notification-engine';
-import { getExpectedActorRole, getStageLabel } from './workflow-engine';
+import {
+  getExpectedActorRole,
+  getStageLabel,
+  type WorkflowRole,
+} from './workflow-engine';
 import type { ClaimStatus, UserRole, ContractRole } from './types';
+import { SLA_PER_STAGE_MAP, type StageSLA } from './constants';
 
 // ─── SLA Configuration ──────────────────────────────────────────
 
@@ -43,13 +58,41 @@ export interface SLAConfig {
   overduePct: number;
 }
 
-/** SLA limits per active review stage */
-export const SLA_CONFIGS: Record<string, SLAConfig> = {
-  under_supervisor_review:    { limitDays: 3, warningPct: 0.70, overduePct: 1.0 },
-  under_auditor_review:       { limitDays: 5, warningPct: 0.70, overduePct: 1.0 },
-  under_reviewer_check:       { limitDays: 5, warningPct: 0.70, overduePct: 1.0 },
-  pending_director_approval:  { limitDays: 3, warningPct: 0.70, overduePct: 1.0 },
-};
+/**
+ * SLA limits per tracked review stage. Phase 2.6 (commit #6) derives
+ * this map from the canonical `SLA_PER_STAGE_MAP` in lib/constants.ts
+ * so adding a new gating stage is a single-line change in one place.
+ *
+ * Stages NOT in SLA_PER_STAGE_MAP are intentionally untracked (e.g.
+ * `under_project_manager_review`) — they do not appear in this object,
+ * so `assessClaimSLA` returns null for them and `assessBatchSLA` skips
+ * them entirely. No SLA notifications are emitted for those stages.
+ *
+ * The warning threshold is fixed at 70% of breachDays for stages where
+ * breachDays > 1. For 1-day SLAs (quality), the warning fires at the
+ * same point as the breach (end of working day) — there is no
+ * meaningful pre-warning window inside a single working day.
+ */
+export const SLA_CONFIGS: Record<string, SLAConfig> = (() => {
+  const out: Record<string, SLAConfig> = {};
+  for (const stage of Object.keys(SLA_PER_STAGE_MAP) as ClaimStatus[]) {
+    const sla: StageSLA | undefined = SLA_PER_STAGE_MAP[stage];
+    if (!sla) continue;
+    // Derive warningPct from per-stage warningDays/breachDays so the
+    // warning fires at the configured warning point (rounded for the
+    // working-day arithmetic). Floor at 0.7 for the 3-day default to
+    // preserve the historical "warning at day 2 of 3" behaviour.
+    const pct = sla.breachDays > 0
+      ? Math.min(1, sla.warningDays / sla.breachDays)
+      : 1;
+    out[stage] = {
+      limitDays:  sla.breachDays,
+      warningPct: pct,
+      overduePct: 1.0,
+    };
+  }
+  return out;
+})();
 
 // ─── SLA Status Types ───────────────────────────────────────────
 
@@ -74,8 +117,10 @@ export interface SLAAssessment {
   level: SLALevel;
   /** Human-readable Arabic description */
   description_ar: string;
-  /** Which role is currently responsible */
-  expectedRole: UserRole | null;
+  /** Which role is currently responsible (Phase 2.6: WorkflowRole, not
+   *  UserRole — may be a ContractRole-only identifier such as
+   *  'quality' / 'project_manager'). */
+  expectedRole: WorkflowRole | null;
   /** Stage label in Arabic */
   stageLabel: string;
 }

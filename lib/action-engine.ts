@@ -33,7 +33,7 @@ import {
   getStageLabel,
   getExpectedActorRole,
 } from './workflow-engine';
-import type { ClaimStatus, UserRole, ContractRole } from './types';
+import type { ClaimStatus, UserRole, ContractRole, WorkflowRole } from './types';
 
 // ─── Action Types ────────────────────────────────────────────────
 
@@ -87,6 +87,21 @@ export interface ClaimAction {
   target: ActionTarget;
   /** Target status after transition (for workflow actions) */
   toStatus: ClaimStatus | null;
+  /**
+   * Phase 2.6 (commit #8) — flexible-return target options.
+   *
+   * When set, this action is a flexible-return: the UI MUST render a
+   * target-stage picker (radio group) inside the return modal. The
+   * picked target is then sent as `to_status` in the transition API
+   * body and validated server-side against the same allow-list.
+   *
+   * Sourced from TransitionDef.returnTargets in CLAIM_TRANSITIONS.
+   * Index 0 is always the contractor-bound default.
+   *
+   * Omitted (undefined) for non-return actions and for legacy
+   * single-target returns (e.g. supervisor → contractor only).
+   */
+  returnTargets?: Array<{ toStatus: ClaimStatus; labelAr: string }>;
   /** Sorting priority (lower = show first) */
   sortOrder: number;
 }
@@ -160,50 +175,54 @@ const LEGACY_WORKFLOW_MAP: Partial<Record<UserRole, UserRole>> = {
 };
 
 /**
- * Maps a single ContractRole → UserRole used by CLAIM_TRANSITIONS.
- * Advisory roles (viewer, project_manager, quality) have no workflow
- * gate, so they fall back to the user's globalRole. final_approver is
- * a first-class workflow role.
+ * Maps a single ContractRole → WorkflowRole used by CLAIM_TRANSITIONS.
+ *
+ * Phase 2.6 (commit #5): `quality` and `project_manager` are promoted
+ * from advisory bypass to first-class workflow-gating roles. They map
+ * to the matching WorkflowRole identifier so users with those
+ * ContractRoles see the approve / return buttons on the new gating
+ * stages (`under_quality_review`, `under_project_manager_review`).
+ *
+ * Only `viewer` retains the no-workflow fall-through to globalRole.
  */
 function contractRoleToWorkflowRole(
   role: ContractRole,
   globalRole: UserRole,
-): UserRole {
-  const map: Record<ContractRole, UserRole> = {
+): WorkflowRole {
+  const map: Record<ContractRole, WorkflowRole> = {
     contractor: 'contractor',
     supervisor: 'supervisor',
     auditor:    'auditor',
     reviewer:   'reviewer',
-    viewer:     globalRole, // viewer has no workflow actions
-    // Migration 045 additions — advisory only, no workflow gate.
-    // Returning globalRole keeps resolution defined; these roles still
-    // produce no actions because they aren't in any CLAIM_TRANSITIONS.allowedRoles.
-    project_manager: globalRole,
-    quality:         globalRole,
-    final_approver: 'final_approver',
+    viewer:     globalRole, // viewer has no workflow actions — fall through
+    // Phase 2.6 — workflow-gating Migration-045 roles.
+    project_manager: 'project_manager',
+    quality:         'quality',
+    final_approver:  'final_approver',
   };
   return map[role];
 }
 
 /**
- * Resolves ALL effective UserRoles the user can act with on this claim's
- * stage transitions. After Migration 045 a user can hold multiple
- * contract roles, so this returns a deduplicated array.
+ * Resolves ALL effective WorkflowRoles the user can act with on this
+ * claim's stage transitions. After Migration 045 a user can hold
+ * multiple contract roles, so this returns a deduplicated array.
  *
  * Priority:
- *   1. Global role (director) → [globalRole]
- *   2. Each contract role → its mapped workflow UserRole (deduped)
+ *   1. Global role (director, etc.) → [globalRole]
+ *   2. Each contract role → its mapped WorkflowRole (deduped). Phase 2.6
+ *      brings `quality` and `project_manager` into this set.
  *   3. Safe fallback: if contractRoles is empty AND user is not global,
  *      use the legacy LEGACY_WORKFLOW_MAP mapping of globalRole, OR fall
  *      through to globalRole itself.
  */
-function resolveWorkflowRoles(ctx: ActionContext): UserRole[] {
+function resolveWorkflowRoles(ctx: ActionContext): WorkflowRole[] {
   if (ctx.isGlobalRole) return [ctx.globalRole];
 
   if (ctx.contractRoles.length > 0) {
     // Plain-array dedup (no Set) so this compiles under the project's
     // default ES target without requiring --downlevelIteration.
-    const out: UserRole[] = [];
+    const out: WorkflowRole[] = [];
     for (const cr of ctx.contractRoles) {
       const wr = contractRoleToWorkflowRole(cr, ctx.globalRole);
       if (!out.includes(wr)) out.push(wr);
@@ -213,44 +232,81 @@ function resolveWorkflowRoles(ctx: ActionContext): UserRole[] {
 
   // Safe fallback: no contract role on this contract → use legacy
   // profiles.role mapping (consultant → supervisor, admin → auditor),
-  // or the globalRole itself if no legacy alias applies.
+  // or the globalRole itself if no legacy alias applies. Both branches
+  // return UserRole values which are assignable to WorkflowRole.
   return [LEGACY_WORKFLOW_MAP[ctx.globalRole] || ctx.globalRole];
 }
 
 /**
  * Backward-compat single-value resolver — returns the first workflow
  * role from the multi-role resolver. Existing call sites that expect a
- * single UserRole keep working.
+ * single role keep working.
  *
  * @deprecated since Phase 2B.2.2 — prefer `resolveWorkflowRoles`.
  */
-function resolveWorkflowRole(ctx: ActionContext): UserRole {
+function resolveWorkflowRole(ctx: ActionContext): WorkflowRole {
   const roles = resolveWorkflowRoles(ctx);
   return roles[0] ?? ctx.globalRole;
 }
 
 // ─── Document Validation ─────────────────────────────────────────
 
-/** Statuses where document upload is possible and relevant */
+/**
+ * Statuses where document upload is possible and relevant.
+ *
+ * Phase 2.6: extended with the 4 NEW returned_by_* sinks so contractors
+ * can attach updated documents after a return from technical / quality
+ * / project-manager / final-approver before resubmitting. The legacy
+ * sinks (supervisor / auditor) are retained for in-flight pre-Migration-
+ * 046 claims.
+ */
 const UPLOAD_ELIGIBLE_STATUSES: ClaimStatus[] = [
   'draft',
   'under_supervisor_review', // contractor can edit attachments before supervisor acts
   'returned_by_supervisor',
   'returned_by_auditor',
+  // Phase 2.6 — new returned-to-contractor sinks
+  'returned_by_technical',
+  'returned_by_quality',
+  'returned_by_project_manager',
+  'returned_by_final_approver',
 ];
 
-/** Statuses where the contractor can resubmit */
+/**
+ * Statuses where the contractor can resubmit.
+ *
+ * Phase 2.6: any returned_by_* sink lets the contractor resubmit; the
+ * resubmit always re-enters the pipeline at the consultant stage so
+ * downstream review is re-performed. The CLAIM_TRANSITIONS state
+ * machine enforces this routing — this list is just the UX gate that
+ * lights up the "resubmit" business action card.
+ */
 const RESUBMIT_STATUSES: ClaimStatus[] = [
   'returned_by_supervisor',
   'returned_by_auditor',
+  // Phase 2.6 — new returned-to-contractor sinks
+  'returned_by_technical',
+  'returned_by_quality',
+  'returned_by_project_manager',
+  'returned_by_final_approver',
 ];
 
-/** Statuses requiring documents before approval can proceed */
+/**
+ * Statuses requiring documents before approval can proceed.
+ *
+ * Phase 2.6: extended with the 3 new gating stages. The certificate
+ * gate on under_supervisor_review (in buildWorkflowAction) is still
+ * orthogonal — these are the document-attached gates only.
+ */
 const NEEDS_DOCS_FOR_APPROVAL: ClaimStatus[] = [
   'submitted',
   'under_supervisor_review',
-  'under_auditor_review',
-  'under_reviewer_check',
+  'under_auditor_review',           // legacy
+  'under_reviewer_check',           // legacy
+  // Phase 2.6 — new gating stages
+  'under_technical_review',
+  'under_quality_review',
+  'under_project_manager_review',
   'pending_director_approval',
 ];
 
@@ -300,9 +356,14 @@ export function getAvailableActionsForClaim(ctx: ActionContext): ClaimAction[] {
   const seenWorkflowActions = new Set<string>();
   const transitions = CLAIM_TRANSITIONS[ctx.claimStatus] || [];
   for (const t of transitions) {
-    // OLD: allowedRoles.includes(contractRole)
-    // NEW: allowedRoles.some(role => contractRoles.includes(role))
-    //      …implemented over the resolved workflowRoles set.
+    // Multi-role overlap check. Both sides are WorkflowRole[] after
+    // Phase 2.6 commit #5, so `Array.includes` is sound:
+    //   t.allowedRoles : WorkflowRole[]   (from CLAIM_TRANSITIONS)
+    //   workflowRoles  : WorkflowRole[]   (from resolveWorkflowRoles)
+    // The transition matches if ANY of the user's resolved workflow
+    // roles is in t.allowedRoles. Each transition is added at most
+    // once (deduped by action) so the UI doesn't render duplicate
+    // buttons for users with overlapping roles.
     const matched = t.allowedRoles.some((ar) => workflowRoles.includes(ar));
     if (!matched) continue;
 
@@ -314,11 +375,14 @@ export function getAvailableActionsForClaim(ctx: ActionContext): ClaimAction[] {
       // Director-stage actions: only actual directors
       hasPermission = ctx.isGlobalRole && ctx.globalRole === 'director';
     } else if (
-      ctx.contractRoles.some(
-        (cr) => cr !== 'viewer' && cr !== 'project_manager' && cr !== 'quality',
-      )
+      ctx.contractRoles.some((cr) => cr !== 'viewer')
     ) {
-      // At least one gating contract role (i.e. not advisory) is held.
+      // Phase 2.6 (commit #5): every non-viewer contract role is now a
+      // gating role — including `quality` and `project_manager` which
+      // were previously excluded as "advisory". The role-match check
+      // above has already filtered to transitions whose allowedRoles
+      // overlap with the user's workflow roles, so reaching this point
+      // means the user genuinely holds an action-eligible role.
       hasPermission = true;
     } else if (ctx.contractRoles.length === 0 && !ctx.isGlobalRole) {
       // Legacy fallback: no user_contract_roles entry, but globalRole
@@ -518,6 +582,14 @@ function buildWorkflowAction(t: TransitionDef, ctx: ActionContext): ClaimAction 
   // Resolve Arabic label
   const label_ar = resolveLabel(t, ctx.claimStatus);
 
+  // Phase 2.6 — pass-through of TransitionDef.returnTargets so the UI
+  // can render the target-stage picker. Only emitted when present (the
+  // legacy single-target supervisor→contractor return omits it, and
+  // non-return actions never have it set on TransitionDef).
+  const returnTargets = t.returnTargets && t.returnTargets.length > 0
+    ? t.returnTargets.map((rt) => ({ ...rt }))
+    : undefined;
+
   return {
     type: actionType,
     workflowAction: t.action,
@@ -532,6 +604,7 @@ function buildWorkflowAction(t: TransitionDef, ctx: ActionContext): ClaimAction 
     reason_if_disabled: reasonIfDisabled,
     target: t.requiresNote ? 'modal' : 'claim_detail',
     toStatus: t.toStatus,
+    returnTargets,
     sortOrder: actionSortOrder(t.action),
   };
 }

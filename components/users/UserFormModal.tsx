@@ -41,10 +41,16 @@ const ROLE_OPTIONS: { value: UserRole; labelAr: string; desc: string }[] = [
 // الوحدة الفنية / وحدة الجودة / مدير المشروع / الاعتماد النهائي / مشاهدة).
 //
 // `kind` distinguishes:
-//   - 'workflow'  : gates a workflow stage transition (contractor / supervisor /
-//                   auditor / reviewer / final_approver)
-//   - 'advisory'  : has visibility but does NOT change claim.status
-//                   (project_manager nudge/escalation, quality comments, viewer)
+//   - 'workflow'  : gates a workflow stage transition. After Phase 2.6
+//                   (commits #4–#5) the workflow-gating set includes
+//                   contractor / supervisor / auditor / reviewer /
+//                   final_approver AND the two new gates from
+//                   Migration 045: quality (SLA-1d) and
+//                   project_manager (monitoring + escalation).
+//   - 'advisory'  : has visibility but does NOT change claim.status.
+//                   Only `viewer` remains in this category — quality
+//                   and project_manager were promoted to workflow on
+//                   2026-04-29 with the upgrade plan §3a/§3d wiring.
 const CONTRACT_ROLE_OPTIONS: {
   value: ContractRole;
   labelAr: string;
@@ -56,8 +62,9 @@ const CONTRACT_ROLE_OPTIONS: {
   { value: 'auditor',         labelAr: 'تدقيق',                          kind: 'workflow', hint: 'تدقيق فني للمطالبات' },
   { value: 'reviewer',        labelAr: 'الوحدة الفنية',                  kind: 'workflow', hint: 'مراجعة قبل الاعتماد النهائي' },
   { value: 'final_approver',  labelAr: 'الاعتماد النهائي',               kind: 'workflow', hint: 'صلاحية الاعتماد أو الرفض النهائي' },
-  { value: 'project_manager', labelAr: 'مدير المشروع',                   kind: 'advisory', hint: 'متابعة وتنبيه — بدون تغيير حالة' },
-  { value: 'quality',         labelAr: 'وحدة الجودة',                    kind: 'advisory', hint: 'ملاحظات جودة — بدون تغيير حالة' },
+  // Phase 2.6 — promoted from advisory to workflow-gating.
+  { value: 'project_manager', labelAr: 'مدير المشروع',                   kind: 'workflow', hint: 'مراجعة مدير المشروع ومتابعة التصعيد' },
+  { value: 'quality',         labelAr: 'وحدة الجودة',                    kind: 'workflow', hint: 'مراجعة جودة إلزامية — SLA يوم عمل' },
   { value: 'viewer',          labelAr: 'مشاهدة',                         kind: 'advisory', hint: 'اطلاع فقط' },
 ];
 
@@ -433,9 +440,9 @@ export default function UserFormModal({
 
                       {/* Per-role checkbox group (only when contract is linked).
                           Each pill is its own checkbox — select any combination.
-                          Workflow roles render in teal; advisory roles (project
-                          manager, quality, viewer) render in grey to signal
-                          they don't gate transitions. */}
+                          Workflow roles render in teal (now including quality
+                          and project_manager after Phase 2.6); only `viewer`
+                          renders in grey to signal it doesn't gate transitions. */}
                       {isLinked && (
                         <div className="mt-2 flex flex-wrap gap-1.5 ps-7">
                           {CONTRACT_ROLE_OPTIONS.map(opt => {
@@ -475,15 +482,16 @@ export default function UserFormModal({
                 })}
               </div>
 
-              {/* Legend — clarifies the workflow vs advisory distinction */}
+              {/* Legend — clarifies the workflow vs advisory distinction.
+                  Phase 2.6: only `viewer` is advisory now. */}
               <div className="mt-2 flex flex-wrap items-center gap-3 text-[0.62rem] text-gray-500">
                 <span className="inline-flex items-center gap-1">
                   <span className="inline-block w-2 h-2 rounded-full bg-[#045859]" aria-hidden />
-                  أدوار سير الاعتماد
+                  أدوار سير الاعتماد (تغيّر حالة المطالبة)
                 </span>
                 <span className="inline-flex items-center gap-1">
                   <span className="inline-block w-2 h-2 rounded-full bg-gray-500" aria-hidden />
-                  أدوار استشارية / متابعة (لا تغيّر حالة المطالبة)
+                  دور المشاهدة (اطلاع فقط)
                 </span>
               </div>
             </div>

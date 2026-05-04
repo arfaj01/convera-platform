@@ -143,6 +143,7 @@ function InlineActions({
   const { showToast } = useToast();
   const [modalAction, setModalAction] = useState<ClaimAction | null>(null);
   const [reason, setReason] = useState('');
+  const [pickedTarget, setPickedTarget] = useState<ClaimStatus | null>(null);
   const [loading, setLoading] = useState(false);
 
   // ── Single source of truth: action engine ──
@@ -151,6 +152,16 @@ function InlineActions({
 
   // Also include director_override if present
   const directorOverride = allActions.find(a => a.type === 'director_override');
+
+  // Phase 2.6 — pre-select the contractor-bound default whenever the
+  // modal opens with a flexible-return action.
+  useEffect(() => {
+    if (modalAction?.returnTargets && modalAction.returnTargets.length > 0) {
+      setPickedTarget(modalAction.returnTargets[0].toStatus);
+    } else {
+      setPickedTarget(null);
+    }
+  }, [modalAction]);
 
   if (wfActions.length === 0 && !directorOverride) return null;
 
@@ -165,10 +176,14 @@ function InlineActions({
         claim.status,
         action.toStatus || claim.status,
         notes,
+        // Phase 2.6: forward the picked return target (only meaningful
+        // for return actions). Server-side validates against allow-list.
+        pickedTarget || undefined,
       );
       showToast('تم تنفيذ الإجراء بنجاح ✓', 'ok');
       setModalAction(null);
       setReason('');
+      setPickedTarget(null);
       onDone();
     } catch (e) {
       showToast(`خطأ: ${(e as Error).message}`, 'error');
@@ -179,6 +194,11 @@ function InlineActions({
 
   const minLen = modalAction?.min_input_length || 10;
   const isReject = modalAction?.type === 'reject';
+  const hasReturnTargets = !!modalAction?.returnTargets && modalAction.returnTargets.length > 0;
+  const confirmDisabled =
+    loading ||
+    reason.length < minLen ||
+    (hasReturnTargets && !pickedTarget);
 
   return (
     <>
@@ -223,15 +243,15 @@ function InlineActions({
       {/* Reason / Override Modal */}
       <Modal
         open={!!modalAction}
-        onClose={() => { setModalAction(null); setReason(''); }}
+        onClose={() => { setModalAction(null); setReason(''); setPickedTarget(null); }}
         title={modalAction?.label_ar || ''}
         footer={
           <>
-            <Button variant="outline" onClick={() => { setModalAction(null); setReason(''); }}>إلغاء</Button>
+            <Button variant="outline" onClick={() => { setModalAction(null); setReason(''); setPickedTarget(null); }}>إلغاء</Button>
             <Button
               variant={isReject ? 'red' : 'teal'}
               onClick={() => modalAction && execute(modalAction, reason)}
-              disabled={loading || reason.length < minLen}
+              disabled={confirmDisabled}
             >
               {loading ? 'جاري التنفيذ...' : 'تأكيد'}
             </Button>
@@ -261,13 +281,51 @@ function InlineActions({
           />
         ) : (
           <>
+            {/* Phase 2.6 — flexible-return target picker (radio group).
+                Shown ONLY when the action carries returnTargets. */}
+            {hasReturnTargets && modalAction?.returnTargets && (
+              <div className="mb-4">
+                <label className="block text-xs font-bold text-gray-600 mb-1.5">
+                  إرجاع إلى <span className="text-red">*</span>
+                </label>
+                <div
+                  className="flex flex-col gap-1.5 bg-gray-50 rounded p-2 border border-gray-200"
+                  onClick={e => e.stopPropagation()}
+                >
+                  {modalAction.returnTargets.map((target, idx) => (
+                    <label
+                      key={target.toStatus}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-white"
+                    >
+                      <input
+                        type="radio"
+                        name="return-target-inline"
+                        value={target.toStatus}
+                        checked={pickedTarget === target.toStatus}
+                        onChange={() => setPickedTarget(target.toStatus)}
+                        className="accent-[#045859]"
+                      />
+                      <span className="text-sm font-bold text-gray-700">
+                        {target.labelAr}
+                      </span>
+                      {idx === 0 && (
+                        <span className="text-[0.6rem] text-gray-400 mr-auto">
+                          (الافتراضي)
+                        </span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <label className="block text-xs font-bold text-gray-600 mb-1">
               {isReject ? 'سبب الرفض (إلزامي)' : 'سبب الإرجاع (إلزامي)'}
             </label>
             <textarea
               value={reason}
               onChange={e => setReason(e.target.value)}
-              placeholder="اكتب السبب بشكل واضح (10 أحرف على الأقل)..."
+              placeholder={`اكتب السبب بشكل واضح (${minLen} أحرف على الأقل)...`}
               className="w-full p-2.5 border border-gray-200 rounded text-sm bg-gray-50 focus:border-teal focus:outline-none resize-y min-h-[80px]"
               onClick={e => e.stopPropagation()}
             />

@@ -25,6 +25,14 @@ export const CLAIM_STATUS_LABEL_AR: Record<ClaimStatus, string> = {
   under_auditor_review:      'مراجعة المدقق',
   returned_by_auditor:       'مُرجَعة من المدقق',
   under_reviewer_check:      'فحص المراجع',
+  // Phase 2.6 — quality / technical / PM / final-approver-return stages.
+  under_technical_review:        'مراجعة الوحدة الفنية بالوزارة',
+  returned_by_technical:         'مُرجَعة من الوحدة الفنية بالوزارة',
+  under_quality_review:          'مراجعة وحدة الجودة بالوزارة',
+  returned_by_quality:           'مُرجَعة من وحدة الجودة بالوزارة',
+  under_project_manager_review:  'مراجعة مدير المشروع',
+  returned_by_project_manager:   'مُرجَعة من مدير المشروع',
+  returned_by_final_approver:    'مُرجَعة من الاعتماد النهائي',
   pending_director_approval: 'بانتظار اعتماد المدير',
   approved:                  'معتمدة',
   rejected:                  'مرفوضة',
@@ -108,6 +116,11 @@ export function ownerStageOf(status: ClaimStatus): WorkflowStage | null {
     case 'draft':
     case 'returned_by_supervisor':
     case 'returned_by_auditor':
+    // Phase 2.6 — every returned_by_* sends ownership back to the contractor.
+    case 'returned_by_technical':
+    case 'returned_by_quality':
+    case 'returned_by_project_manager':
+    case 'returned_by_final_approver':
       return 'contractor';
     case 'submitted':                  // transient — auto-routed
     case 'under_supervisor_review':
@@ -115,6 +128,12 @@ export function ownerStageOf(status: ClaimStatus): WorkflowStage | null {
     case 'under_auditor_review':
       return 'auditor';
     case 'under_reviewer_check':
+    // Phase 2.6 — technical/quality/PM all collapse onto the reviewer
+    // bullet on the 5-stage rail; dedicated visualisation comes in a
+    // follow-up commit alongside the workflow-engine transitions.
+    case 'under_technical_review':
+    case 'under_quality_review':
+    case 'under_project_manager_review':
       return 'reviewer';
     case 'pending_director_approval':
       return 'director';

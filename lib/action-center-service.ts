@@ -85,6 +85,26 @@ export interface ActionItem {
 
 // ─── Return type ──────────────────────────────────────────────────
 
+/**
+ * Phase 2.6 — Per-stage pipeline summary card for the action-center
+ * page header. Surfaces the count of in-flight claims at each gating
+ * stage alongside its SLA limit (or "untracked" sentinel for PM).
+ */
+export interface StageSummary {
+  /** ClaimStatus value (e.g. 'under_quality_review') */
+  status:         string;
+  /** Arabic display label */
+  labelAr:        string;
+  /** Number of in-flight claims at this stage */
+  count:          number;
+  /** Number of those claims whose age has already breached SLA */
+  overdueCount:   number;
+  /** Working-days limit, or null if the stage has no SLA */
+  slaDays:        number | null;
+  /** Stage-specific routing hint (e.g. CSS class hint) */
+  kind:           'consultant' | 'technical' | 'quality' | 'pm' | 'final' | 'legacy';
+}
+
 export interface ActionCenterResult {
   items:         ActionItem[];
   totalCritical: number;
@@ -93,29 +113,54 @@ export interface ActionCenterResult {
   totalLow:      number;
   totalOverdue:  number;
   totalMine:     number;
+  /** Phase 2.6 — per-stage pipeline cards (in-flight gating stages only) */
+  byStage:       StageSummary[];
   generatedAt:   string;
 }
 
 // ─── SLA limits per claim stage ───────────────────────────────────
 
-const SLA_DAYS: Record<string, number> = {
-  submitted:                  7,
-  under_supervisor_review:    3,
-  under_auditor_review:       5,
-  under_reviewer_check:       5,
-  pending_director_approval:  3,
-  // Legacy aliases
-  under_consultant_review:    3,
-  under_admin_review:         5,
-};
+import { SLA_PER_STAGE_MAP } from './constants';
+import { isStageSLATracked } from './sla-engine';
+
+/**
+ * SLA breach thresholds (working days) per claim stage.
+ *
+ * Phase 2.6 (commit #11): derived from `SLA_PER_STAGE_MAP` in
+ * lib/constants.ts (single source of truth). Stages NOT in the
+ * canonical map are intentionally untracked here — `under_project_
+ * manager_review` is a monitoring stage with no SLA, and it stays
+ * out of this table so the rest of the action-center logic (warning /
+ * breach detection at lines ~423–478) skips it cleanly.
+ *
+ * Legacy aliases (under_consultant_review / under_admin_review) are
+ * still mapped because some pre-Migration-009 claim rows may exist
+ * in DB; keeping them prevents NaN math on a few historical rows.
+ */
+const SLA_DAYS: Record<string, number> = (() => {
+  const out: Record<string, number> = {
+    submitted: 7,
+    // Legacy schema-migration-era aliases — predate Migration 009.
+    under_consultant_review: 3,
+    under_admin_review:      5,
+  };
+  for (const [stage, sla] of Object.entries(SLA_PER_STAGE_MAP)) {
+    if (sla) out[stage] = sla.breachDays;
+  }
+  return out;
+})();
 
 // ─── Statuses considered "in flight" (needing someone to act) ─────
 
-const IN_FLIGHT = new Set([
+const IN_FLIGHT = new Set<string>([
   'submitted',
   'under_supervisor_review',
-  'under_auditor_review',
-  'under_reviewer_check',
+  'under_auditor_review',           // legacy
+  'under_reviewer_check',           // legacy
+  // Phase 2.6 — new gating stages.
+  'under_technical_review',
+  'under_quality_review',
+  'under_project_manager_review',
   'pending_director_approval',
   // Legacy aliases (backward compat)
   'under_consultant_review',
@@ -123,15 +168,35 @@ const IN_FLIGHT = new Set([
 ]);
 
 // ─── Which statuses are "assigned" to each role ───────────────────
+//
+// Phase 2.6 note: `STAGE_OWNERS` is keyed on `UserRole` (profile.role),
+// because that's what `isAssignedToMe` receives. The new ContractRole-
+// only roles (`quality`, `project_manager`) cannot appear here — they
+// don't exist in the UserRole union. The action-engine performs the
+// precise contract-scoped match via `isExpectedActor`; the coarse
+// `isAssignedToMe` heuristic in the action-center is just for ribbon
+// labelling and is allowed to be approximate.
 
 const STAGE_OWNERS: Record<string, UserRole[]> = {
   submitted:                  [],                              // auto-advances
   under_supervisor_review:    ['supervisor', 'consultant'],
-  under_auditor_review:       ['auditor', 'admin', 'reviewer'],
-  under_reviewer_check:       ['reviewer'],
+  under_auditor_review:       ['auditor', 'admin', 'reviewer'],   // legacy
+  under_reviewer_check:       ['reviewer'],                       // legacy
+  // Phase 2.6 — new gating stages: coarse owner approximation.
+  // The ribbon "بانتظارك" lights up for any reviewer-tier profile
+  // when the claim is at one of the new stages; the action-engine
+  // narrows that to the exact ContractRole holder.
+  under_technical_review:     ['reviewer'],
+  under_quality_review:       ['reviewer'],
+  under_project_manager_review: ['reviewer'],
   pending_director_approval:  ['director'],
   returned_by_supervisor:     ['contractor'],
   returned_by_auditor:        ['contractor'],
+  // Phase 2.6 — new returned-to-contractor sinks.
+  returned_by_technical:        ['contractor'],
+  returned_by_quality:          ['contractor'],
+  returned_by_project_manager:  ['contractor'],
+  returned_by_final_approver:   ['contractor'],
   // Legacy aliases
   under_consultant_review:    ['consultant', 'supervisor'],
   under_admin_review:         ['admin', 'reviewer', 'auditor'],
@@ -144,12 +209,21 @@ const STAGE_OWNERS: Record<string, UserRole[]> = {
 
 const STAGE_LABELS: Record<string, string> = {
   submitted:                  'تم التقديم',
-  under_supervisor_review:    'مراجعة جهة الإشراف',
-  under_auditor_review:       'مراجعة المدقق',
-  under_reviewer_check:       'مراجعة المراجع',
-  pending_director_approval:  'اعتماد المدير',
-  returned_by_supervisor:     'مُرجَّعة من جهة الإشراف',
+  under_supervisor_review:    'مراجعة المكتب الهندسي',
+  under_auditor_review:       'مراجعة المدقق',                  // legacy
+  under_reviewer_check:       'مراجعة المراجع',                 // legacy
+  // Phase 2.6 — new gating stages.
+  under_technical_review:     'مراجعة الوحدة الفنية بالوزارة',
+  under_quality_review:       'مراجعة وحدة الجودة بالوزارة',
+  under_project_manager_review: 'مراجعة مدير المشروع',
+  pending_director_approval:  'الاعتماد النهائي',
+  returned_by_supervisor:     'مُرجَّعة من المكتب الهندسي',
   returned_by_auditor:        'مُرجَّعة من المدقق',
+  // Phase 2.6 — new return sinks.
+  returned_by_technical:        'مُرجَّعة من الوحدة الفنية',
+  returned_by_quality:          'مُرجَّعة من وحدة الجودة',
+  returned_by_project_manager:  'مُرجَّعة من مدير المشروع',
+  returned_by_final_approver:   'مُرجَّعة من الاعتماد النهائي',
   approved:                   'معتمدة',
   rejected:                   'مرفوضة',
   draft:                      'مسودة',
@@ -747,6 +821,46 @@ export async function loadActionCenter(
     if (item.assignedToMe)  totalMine++;
   }
 
+  // ── 7. Phase 2.6 — per-stage pipeline cards ─────────────────────
+  //
+  // Build a small summary of in-flight gating stages. Each card surfaces:
+  //   • count of claims currently at the stage
+  //   • how many of those are SLA-overdue
+  //   • the SLA limit (or null for the PM monitoring stage)
+  //
+  // Driven by SLA_PER_STAGE_MAP (single source of truth) and the
+  // already-computed `claims` array — no extra DB calls.
+  const STAGE_CARD_ORDER: Array<{ status: string; kind: StageSummary['kind']; labelOverride?: string }> = [
+    { status: 'under_supervisor_review',     kind: 'consultant' },
+    { status: 'under_technical_review',      kind: 'technical'  },
+    { status: 'under_quality_review',        kind: 'quality'    },
+    { status: 'under_project_manager_review', kind: 'pm'        },
+    { status: 'pending_director_approval',   kind: 'final'      },
+  ];
+
+  const byStage: StageSummary[] = STAGE_CARD_ORDER.map((sc) => {
+    let count = 0;
+    let overdueCount = 0;
+    const slaLimit = SLA_DAYS[sc.status] ?? null;
+    const tracked  = isStageSLATracked(sc.status);
+    for (const claim of claims) {
+      if (claim.status !== sc.status) continue;
+      count++;
+      if (tracked && slaLimit !== null) {
+        const age = ageInDays(claim.last_transition_at ?? claim.updated_at);
+        if (age >= slaLimit) overdueCount++;
+      }
+    }
+    return {
+      status:       sc.status,
+      labelAr:      STAGE_LABELS[sc.status] ?? sc.status,
+      count,
+      overdueCount,
+      slaDays:      tracked ? slaLimit : null,
+      kind:         sc.kind,
+    };
+  });
+
   return {
     items,
     totalCritical: counts.CRITICAL,
@@ -755,6 +869,7 @@ export async function loadActionCenter(
     totalLow:      counts.LOW,
     totalOverdue,
     totalMine,
+    byStage,
     generatedAt:   new Date().toISOString(),
   };
 }
@@ -762,6 +877,8 @@ export async function loadActionCenter(
 function makeEmptyResult(): ActionCenterResult {
   return {
     items: [], totalCritical: 0, totalHigh: 0, totalMedium: 0, totalLow: 0,
-    totalOverdue: 0, totalMine: 0, generatedAt: new Date().toISOString(),
+    totalOverdue: 0, totalMine: 0,
+    byStage: [],
+    generatedAt: new Date().toISOString(),
   };
 }
