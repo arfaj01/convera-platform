@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "verify:repo-path": "node scripts/verify-repo-path.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
