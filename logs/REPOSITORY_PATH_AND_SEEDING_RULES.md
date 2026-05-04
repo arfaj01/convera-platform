@@ -39,6 +39,29 @@ The `npm run verify:repo-path` guard fails the build if any file under
 `SQL/seeds/` (or `SQL/migrations/` if it changes schema), commit it, then run it
 from there. Do not save throwaway SQL to Desktop or to the legacy CONVERA folder.
 
+### 3a. Auth-user provisioning rule (Phase 2.6 mandate)
+
+**SQL seeds MUST NOT write to `auth.users` or `auth.identities`.** The
+GoTrue server refuses to authenticate users that were inserted into
+`auth.users` by raw SQL — even when the bcrypt password hash and the
+`auth.identities` row appear correct — and returns the misleading
+error _"Database error querying schema"_ at sign-in. This was
+confirmed in the 2026-05-04 staging session.
+
+The official provisioning path:
+
+| Step | Tool | Notes |
+|---|---|---|
+| 1. Create or refresh the auth users | `npm run seed:auth-users` (Node script using `supabase.auth.admin.createUser` / `updateUserById`) | Reads `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TEST_USER_PASSWORD` from `.env.local`. Sets `email_confirm=true`. Idempotent: existing users get metadata refresh; pass `--reset-passwords` to also rewrite the password. |
+| 2. Run the SQL seed | Supabase SQL Editor → `SQL/seeds/005_seed_test_users_cmh.sql` | The seed pre-flights every required user against `auth.users` + `auth.identities` (provider='email') + `email_confirmed_at`. RAISE EXCEPTION if any user is missing/incomplete with the message **"Create this user via Supabase Dashboard/Admin API first."** |
+| 3. (optional) Manual single-user provisioning | Supabase Dashboard → Auth → Users → Invite / Edit | Equivalent to the Admin API, OK for ad-hoc additions. |
+
+Forbidden:
+- `INSERT INTO auth.users …`
+- `UPDATE auth.users SET encrypted_password = crypt(…)`
+- `INSERT INTO auth.identities …`
+- Any direct touching of `auth.*` tables from SQL seeds or migrations.
+
 ## 4. Contract identification rule
 
 Contracts are identified by **two keys jointly**:

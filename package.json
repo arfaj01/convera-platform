@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "verify:repo-path": "node scripts/verify-repo-path.js"
+    "verify:repo-path": "node scripts/verify-repo-path.js",
+    "seed:auth-users": "node scripts/create-test-auth-users.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

@@ -21,8 +21,18 @@
 --              wildcards.
 --  Safety    : NON-DESTRUCTIVE — no rows deleted from auth.users,
 --              profiles, contracts, claims, or change_orders. Only:
---                • auth.users / profiles : INSERTed if missing,
---                  UPDATEd in place (single-user WHERE-clause).
+--                • auth.users / auth.identities : NEVER WRITTEN.
+--                  This script is now READ-ONLY against the auth.*
+--                  schema. Direct INSERTs on auth.users were
+--                  proven to leave users in an inconsistent state
+--                  (the GoTrue server returns "Database error
+--                  querying schema" at sign-in), so all auth-user
+--                  provisioning is delegated to the Supabase Admin
+--                  API — see scripts/create-test-auth-users.js.
+--                • profiles               : INSERTed if missing,
+--                  UPDATEd in place (single-user WHERE-clause). Each
+--                  upsert depends on auth.users already containing
+--                  the matching row.
 --                • user_contract_roles    : prior rows for these 3
 --                  contracts are SOFT-DEACTIVATED (is_active=false).
 --                • contract_approvers     : director added if missing,
@@ -36,25 +46,23 @@
 --
 --  Run as    : Supabase SQL Editor (service_role / postgres).
 --
---  ⚠ PASSWORD: this script ships WITHOUT a password literal. Before
---             running, replace '<PASSWORD>' on the SELECT set_config
---             line below. The script refuses to run with the placeholder
---             still in place. The password is never echoed back.
+--  ⚠ PRE-FLIGHT: every test user MUST already exist in auth.users
+--              with a matching row in auth.identities (provider='email')
+--              and `email_confirmed_at` set, BEFORE this seed runs.
+--              Use scripts/create-test-auth-users.js (Admin API) to
+--              create / update them. Phase 2 below verifies this and
+--              raises a clear EXCEPTION if any user is missing.
 -- ═════════════════════════════════════════════════════════════════════════
 
--- ── 0a. Pre-flight: bootstrap password from session config ───────────
-SELECT set_config('cmh.bootstrap_password', '0555180602', true);
-
-DO $$
-BEGIN
-  IF current_setting('cmh.bootstrap_password', true) IS NULL
-     OR current_setting('cmh.bootstrap_password', true) = ''
-     OR current_setting('cmh.bootstrap_password', true) = '<PASSWORD>' THEN
-    RAISE EXCEPTION
-      'Refuse to run: bootstrap password not set. '
-      'Edit the SELECT set_config(...) line above with a real password before running.';
-  END IF;
-END $$;
+-- ── 0a. (removed) Bootstrap password section ────────────────────────
+--    The earlier version of this seed set passwords directly via
+--    crypt(...) on auth.users.encrypted_password.  That path was
+--    removed because GoTrue refuses to authenticate users that were
+--    inserted into auth.users by raw SQL even when the bcrypt hash
+--    is correct ("Database error querying schema").  Passwords are
+--    now provisioned exclusively through the Admin API helper:
+--        scripts/create-test-auth-users.js  (npm run seed:auth-users)
+--    This SQL file no longer touches passwords.
 
 BEGIN;
 
@@ -135,111 +143,87 @@ BEGIN
 END $$;
 
 -- ════════════════════════════════════════════════════════════════════
--- PHASE 2 — Upsert auth.users (8 unique users across the 3 contracts)
+-- PHASE 2 — READ-ONLY pre-flight on auth.users + auth.identities
 -- ════════════════════════════════════════════════════════════════════
 --
--- Email is case-insensitive: lookups go through LOWER(email). If the
--- email already exists in auth.users with any casing, we keep the
--- existing UUID and only refresh the password + metadata.  If the
--- email does NOT exist, we INSERT a new row with a fresh UUID.
+-- This phase performs ZERO writes against the auth.* schema.
+-- Direct INSERT/UPDATE on auth.users (and auth.identities) is now
+-- forbidden — see logs/REPOSITORY_PATH_AND_SEEDING_RULES.md and the
+-- header banner above. All test-user provisioning is delegated to
+-- the Supabase Admin API helper:
+--     scripts/create-test-auth-users.js  (npm run seed:auth-users)
 --
--- `Ma.Alarfaj@momah.gov.sa` and `ma.alarfaj@momah.gov.sa` collapse to
--- a single user via LOWER(email).
+-- For each required email this phase verifies that:
+--   (a) a row exists in auth.users (case-insensitive lookup)
+--   (b) the user has an `auth.identities` row with provider='email'
+--   (c) the user's email_confirmed_at is NOT NULL
+-- If ANY of these fails, the script raises an exception with the
+-- exact email and a clear remediation message. No subsequent phases
+-- run unless every required user is auth-ready.
 
 DO $$
 DECLARE
-  v_pwd_hash    TEXT;
-  v_existing_id UUID;
-  v_new_id      UUID;
-
-  -- Per-user closure for the upsert pattern. Each entry: email, full_name,
-  -- full_name_ar, profiles.role fallback (a value that exists in the prod
-  -- user_role enum — never 'final_approver' since it may not be present
-  -- in prod yet — and never the ContractRole-only values).
-  user_specs   TEXT[][] := ARRAY[
-    ARRAY['Ma.Alarfaj@momah.gov.sa',                'Mohammed Alarfaj',                'محمد العرفج',                  'director'],
-    ARRAY['halhablayn-Contractor@momah.gov.sa',     'Hossam Al-Hablayn',               'حسام الحبلين',                  'reviewer'],
-    ARRAY['aaldera-contractor@momah.gov.sa',        'Abdullah Al-Dera',                'عبدالله الدرع',                 'reviewer'],
-    ARRAY['anaalghamdi-contractor@momah.gov.sa',    'Anas Al-Ghamdi',                  'أنس الغامدي',                   'reviewer'],
-    ARRAY['mahmoud.ragab@beeah.sa',                 'Mahmoud Massad',                  'محمود مساد',                    'consultant'],
-    ARRAY['info@gdci.com.sa',                       'Gulf Development Contracting',    'شركة الخليج المتطورة للمقاولات', 'contractor'],
-    ARRAY['fakher@alleanzaa.com',                   'Alleanzaa Contracting',           'شركة إليانزا للمقاولات',         'contractor'],
-    ARRAY['malek.h.mkh@gmail.com',                  'Malik Al-Oqab',                   'مالك العقاب',                    'contractor']
+  v_email      TEXT;
+  v_user_id    UUID;
+  v_confirmed  TIMESTAMPTZ;
+  v_has_ident  BOOLEAN;
+  required_emails TEXT[] := ARRAY[
+    'ma.alarfaj@momah.gov.sa',
+    'halhablayn-Contractor@momah.gov.sa',
+    'aaldera-contractor@momah.gov.sa',
+    'anaalghamdi-contractor@momah.gov.sa',
+    'mahmoud.ragab@beeah.sa',
+    'info@gdci.com.sa',
+    'fakher@alleanzaa.com',
+    'malek.h.mkh@gmail.com'
   ];
-  i INT;
 BEGIN
-  v_pwd_hash := crypt(current_setting('cmh.bootstrap_password', true), gen_salt('bf', 10));
+  FOREACH v_email IN ARRAY required_emails LOOP
 
-  FOR i IN 1..array_length(user_specs, 1) LOOP
-    SELECT id INTO v_existing_id
+    -- (a) auth.users must exist (case-insensitive).
+    SELECT id, email_confirmed_at
+      INTO v_user_id, v_confirmed
       FROM auth.users
-     WHERE LOWER(email) = LOWER(user_specs[i][1])
+     WHERE LOWER(email) = LOWER(v_email)
      LIMIT 1;
 
-    IF v_existing_id IS NULL THEN
-      v_new_id := gen_random_uuid();
-      INSERT INTO auth.users (
-        id, instance_id, email, encrypted_password,
-        email_confirmed_at, created_at, updated_at,
-        raw_user_meta_data, role, aud
-      ) VALUES (
-        v_new_id,
-        '00000000-0000-0000-0000-000000000000',
-        user_specs[i][1],
-        v_pwd_hash,
-        NOW(), NOW(), NOW(),
-        jsonb_build_object(
-          'full_name',    user_specs[i][2],
-          'full_name_ar', user_specs[i][3],
-          'role',         user_specs[i][4]
-        ),
-        'authenticated', 'authenticated'
-      );
-      RAISE NOTICE 'Created auth user: % (% — %)',
-        user_specs[i][3], v_new_id, user_specs[i][4];
-    ELSE
-      UPDATE auth.users
-         SET encrypted_password = v_pwd_hash,
-             raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) ||
-                                  jsonb_build_object(
-                                    'full_name',    user_specs[i][2],
-                                    'full_name_ar', user_specs[i][3],
-                                    'role',         user_specs[i][4]
-                                  ),
-             updated_at = NOW()
-       WHERE id = v_existing_id;
-      RAISE NOTICE 'Refreshed auth user: % (% — %)',
-        user_specs[i][3], v_existing_id, user_specs[i][4];
+    IF v_user_id IS NULL THEN
+      RAISE EXCEPTION
+        'PRE-FLIGHT FAIL: auth.users row missing for email "%". '
+        'Create this user via Supabase Dashboard / Admin API first '
+        '(run: npm run seed:auth-users from the convera-platform repo).',
+        v_email;
     END IF;
+
+    -- (b) auth.identities must include provider='email'.
+    SELECT EXISTS (
+      SELECT 1 FROM auth.identities
+       WHERE user_id  = v_user_id
+         AND provider = 'email'
+    ) INTO v_has_ident;
+
+    IF NOT v_has_ident THEN
+      RAISE EXCEPTION
+        'PRE-FLIGHT FAIL: auth.identities row missing (provider=email) '
+        'for "%". GoTrue cannot authenticate this user without it. '
+        'Create this user via Supabase Dashboard / Admin API first '
+        '(run: npm run seed:auth-users).',
+        v_email;
+    END IF;
+
+    -- (c) email_confirmed_at must be set.
+    IF v_confirmed IS NULL THEN
+      RAISE EXCEPTION
+        'PRE-FLIGHT FAIL: email_confirmed_at IS NULL for "%". '
+        'Confirm the email in Supabase Dashboard or set email_confirm=true '
+        'when creating the user via the Admin API '
+        '(npm run seed:auth-users does this automatically).',
+        v_email;
+    END IF;
+
+    RAISE NOTICE 'PRE-FLIGHT OK: % → user_id=% confirmed_at=%',
+      v_email, v_user_id, v_confirmed;
   END LOOP;
-END $$;
-
--- 2b) Defensive guard: every required user must now exist in auth.users.
-DO $$
-DECLARE
-  v_missing TEXT;
-BEGIN
-  SELECT email_lc INTO v_missing
-    FROM (VALUES
-      (LOWER('ma.alarfaj@momah.gov.sa')),
-      (LOWER('halhablayn-Contractor@momah.gov.sa')),
-      (LOWER('aaldera-contractor@momah.gov.sa')),
-      (LOWER('anaalghamdi-contractor@momah.gov.sa')),
-      (LOWER('mahmoud.ragab@beeah.sa')),
-      (LOWER('info@gdci.com.sa')),
-      (LOWER('fakher@alleanzaa.com')),
-      (LOWER('malek.h.mkh@gmail.com'))
-    ) AS req(email_lc)
-   WHERE NOT EXISTS (
-     SELECT 1 FROM auth.users u WHERE LOWER(u.email) = req.email_lc
-   )
-   LIMIT 1;
-
-  IF v_missing IS NOT NULL THEN
-    RAISE EXCEPTION
-      'Required test user is missing from auth.users after upsert phase: %. '
-      'Cannot proceed.', v_missing;
-  END IF;
 END $$;
 
 -- ════════════════════════════════════════════════════════════════════
