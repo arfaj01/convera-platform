@@ -20,7 +20,7 @@ interface BOQTableProps {
 function BOQTableInner({ items, onChange, readonly = false, prevProgressValues }: BOQTableProps) {
   const hasPrevProgress = prevProgressValues && Object.keys(prevProgressValues).length > 0;
 
-  // prev = الكميات المنفذة (سابق), curr = الكميات الحالية (جاري)
+  // prev = الكمية السابقة (system-calculated, read-only), curr = الكمية الحالية (contractor-editable)
   const [values, setValues] = useState<Record<number, { prev: number; curr: number }>>(
     () => Object.fromEntries(items.map(it => [
       it.id,
@@ -78,11 +78,11 @@ function BOQTableInner({ items, onChange, readonly = false, prevProgressValues }
             <th className="bg-teal-dark text-white/85 text-[0.64rem] text-right px-2 py-2">البند</th>
             <th className="bg-teal-dark text-white/85 text-[0.64rem] text-right px-2 py-2">سعر الوحدة</th>
             <th className="bg-teal-dark text-white/85 text-[0.64rem] text-center px-2 py-2">الكمية التعاقدية</th>
-            <th className="bg-teal-dark text-white/85 text-[0.64rem] text-center px-2 py-2">الكميات المنفذة</th>
-            <th className="bg-teal-dark text-white/85 text-[0.64rem] text-center px-1.5 py-2 bg-teal">الكميات الحالية (جاري)</th>
+            <th className="bg-teal-dark text-white/85 text-[0.64rem] text-center px-2 py-2">الكمية السابقة</th>
+            <th className="bg-teal-dark text-white/85 text-[0.64rem] text-center px-1.5 py-2 bg-teal">الكمية الحالية</th>
             <th className="bg-teal-dark text-white/85 text-[0.64rem] text-center px-2 py-2">نسبة الإنجاز</th>
-            <th className="bg-teal-dark text-white/85 text-[0.64rem] text-right px-2 py-2">المستحق الجاري</th>
-            <th className="bg-teal-dark text-white/85 text-[0.64rem] text-right px-2 py-2">المبلغ الإجمالي</th>
+            <th className="bg-teal-dark text-white/85 text-[0.64rem] text-right px-2 py-2">قيمة المستخلص الحالي</th>
+            <th className="bg-teal-dark text-white/85 text-[0.64rem] text-right px-2 py-2">القيمة التراكمية</th>
           </tr>
         </thead>
         <tbody>
@@ -101,32 +101,29 @@ function BOQTableInner({ items, onChange, readonly = false, prevProgressValues }
                 <td className="px-2 py-1.5 text-[0.7rem] border-b border-gray-100 max-w-[180px] truncate">{it.name}</td>
                 <td className="px-2 py-1.5 text-[0.75rem] border-b border-gray-100 font-bold text-teal-dark tabular-nums">{fmt(it.price)}</td>
                 <td className="px-2 py-1.5 text-[0.75rem] border-b border-gray-100 text-center tabular-nums">{fmt(it.contractualQty)}</td>
-                {/* الكميات المنفذة (سابق) — locked when auto-calculated */}
+                {/*
+                  الكمية السابقة — ALWAYS read-only and system-calculated.
+                  Phase 2.6 / Gap Review (2026-05-05) item D7: previous
+                  quantity is the SUM of curr_progress over approved claims
+                  for this contract + item, computed by the RPC
+                  create_claim_with_items_atomic. The API strips any
+                  client-sent prev_progress (sanitiseBoqItems in
+                  app/api/claims/create/route.ts) so the UI must never
+                  pretend the field is editable. For brand-new contracts
+                  the value is 0 and the padlock still renders, communicating
+                  that the cell is system-controlled.
+                */}
                 <td className="px-2 py-1.5 border-b border-gray-100 text-center">
-                  {readonly || hasPrevProgress ? (
-                    <div className="flex items-center justify-center gap-1">
-                      <span className="tabular-nums text-xs font-bold text-gray-700">{v.prev}</span>
-                      {hasPrevProgress && !readonly && (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#045859" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="محسوب تلقائياً من المطالبات المعتمدة">
-                          <title>محسوب تلقائياً من المطالبات المعتمدة</title>
-                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                        </svg>
-                      )}
-                    </div>
-                  ) : (
-                    <input
-                      type="number"
-                      min={0}
-                      step="any"
-                      value={v.prev || ''}
-                      placeholder="0"
-                      onChange={e => handleChange(it.id, 'prev', parseFloat(e.target.value) || 0)}
-                      className="w-[65px] text-center border border-gray-200 rounded px-1 py-1 text-xs font-sans focus:border-teal focus:outline-none tabular-nums"
-                    />
-                  )}
+                  <div className="flex items-center justify-center gap-1">
+                    <span className="tabular-nums text-xs font-bold text-gray-700">{v.prev}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#045859" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="محسوب تلقائياً من المطالبات المعتمدة">
+                      <title>محسوب تلقائياً من المطالبات المعتمدة</title>
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                  </div>
                 </td>
-                {/* الكميات الحالية (جاري) — highlighted */}
+                {/* الكمية الحالية — only editable column on this row */}
                 <td className="px-1.5 py-1.5 border-b border-gray-100 text-center bg-teal-ultra/50">
                   {readonly ? (
                     <span className="tabular-nums font-bold">{v.curr}</span>
@@ -161,7 +158,7 @@ function BOQTableInner({ items, onChange, readonly = false, prevProgressValues }
         <tfoot>
           <tr>
             <td colSpan={7} className="bg-teal-dark text-white font-bold px-2.5 py-2 border-none text-right text-[0.78rem]">
-              إجمالي تكلفة الفاتورة الحالية (جاري)
+              إجمالي قيمة المستخلص الحالي
             </td>
             <td colSpan={2} className="bg-teal-dark text-white font-bold px-2.5 py-2 border-none text-[0.78rem] tabular-nums">
               {fmt(total)} ريال
