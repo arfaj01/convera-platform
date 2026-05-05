@@ -144,10 +144,32 @@ export default function ClaimDetailPage() {
   const showCertificateDownload = businessActions.some(a => a.type === 'download_certificate');
   const hasCertificate = claim.has_completion_certificate === true;
 
+  // Phase 2.6 / Commit 6: prefer the server-issued claim_number
+  // (Migration 047 — e.g. 'CMH01R260504-001') over the legacy local
+  // claim_no in the page title. Legacy rows that pre-date the migration
+  // fall back to '#<claim_no>'.
+  const displayedClaimId = (claim.claim_number as string | null | undefined) || `#${claim.claim_no}`;
+
+  // Display labels for claim_kind. Mirrors the dropdown order on the
+  // new-claim page. '—' when null (legacy rows).
+  const CLAIM_KIND_LABELS: Record<string, string> = {
+    running_payment: 'مستخلص جاري',
+    final_payment:   'مستخلص ختامي',
+    advance_payment: 'دفعة مقدمة',
+  };
+  const claimKindLabel =
+    (claim.claim_kind && CLAIM_KIND_LABELS[claim.claim_kind as string]) || '—';
+
+  // Prefer canonical work_period_* (Migration 047) when populated;
+  // fall back to legacy period_* for pre-migration rows.
+  const periodFromValue = (claim.work_period_from as string | null | undefined) || (claim.period_from as string | null | undefined);
+  const periodToValue   = (claim.work_period_to   as string | null | undefined) || (claim.period_to   as string | null | undefined);
+  const referenceValue  = (claim.external_reference as string | null | undefined) || (claim.reference_no as string | null | undefined);
+
   return (
     <>
       <PageHeader
-        title={`مطالبة #${claim.claim_no}`}
+        title={`مطالبة ${displayedClaimId}`}
         subtitle={contract?.title_ar || contract?.title || ''}
         action={
           <div className="flex items-center gap-2">
@@ -194,26 +216,37 @@ export default function ClaimDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Main info */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Claim info */}
+          {/* Claim info — Phase 2.6 / Commit 6:
+              - رقم المطالبة (server-issued) is now a top-row field.
+              - نوع المطالبة surfaces claim_kind (running / final / advance).
+              - Period labels relabelled to match Migration 047 wording. */}
           <Card>
             <CardHeader title="بيانات المطالبة" />
             <CardBody>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
+                  <label className="text-[0.67rem] text-gray-400 font-bold block">رقم المطالبة</label>
+                  <span className="text-sm font-bold text-teal-dark tabular-nums">{displayedClaimId}</span>
+                </div>
+                <div>
+                  <label className="text-[0.67rem] text-gray-400 font-bold block">نوع المطالبة</label>
+                  <span className="text-sm font-bold">{claimKindLabel}</span>
+                </div>
+                <div>
                   <label className="text-[0.67rem] text-gray-400 font-bold block">رقم العقد</label>
                   <span className="text-sm font-bold text-teal">{contract?.contract_no || '—'}</span>
                 </div>
                 <div>
-                  <label className="text-[0.67rem] text-gray-400 font-bold block">المرجع</label>
-                  <span className="text-sm font-bold">{claim.reference_no as string || '—'}</span>
+                  <label className="text-[0.67rem] text-gray-400 font-bold block">المرجع (اعتماد)</label>
+                  <span className="text-sm font-bold">{referenceValue || '—'}</span>
                 </div>
                 <div>
-                  <label className="text-[0.67rem] text-gray-400 font-bold block">من</label>
-                  <span className="text-sm font-bold">{fmtDate(claim.period_from as string)}</span>
+                  <label className="text-[0.67rem] text-gray-400 font-bold block">فترة التنفيذ — من</label>
+                  <span className="text-sm font-bold">{fmtDate(periodFromValue as string)}</span>
                 </div>
                 <div>
-                  <label className="text-[0.67rem] text-gray-400 font-bold block">إلى</label>
-                  <span className="text-sm font-bold">{fmtDate(claim.period_to as string)}</span>
+                  <label className="text-[0.67rem] text-gray-400 font-bold block">فترة التنفيذ — إلى</label>
+                  <span className="text-sm font-bold">{fmtDate(periodToValue as string)}</span>
                 </div>
               </div>
             </CardBody>
