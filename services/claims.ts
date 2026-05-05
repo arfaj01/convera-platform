@@ -354,6 +354,68 @@ export async function updateClaim(
 // ─── Claim BOQ & Staff Items ────────────────────────────────────
 
 /**
+ * Phase 2.6 / Commit 4 (2026-05-04).
+ *
+ * Returns the server-truth previous quantity (cumulative `curr_progress`
+ * across all approved claims) for every BOQ item on a given contract.
+ *
+ * This mirrors EXACTLY what the RPC `create_claim_with_items_atomic`
+ * computes on insert — there is no other source of truth. The result
+ * feeds `BOQTable.prevProgressValues` so users see the same number the
+ * server will use to validate `curr_progress + prev <= contractual_qty`,
+ * and the prev column renders LOCKED with a padlock badge.
+ *
+ * Aggregation rule: SUM(curr_progress) FROM claim_boq_items
+ *   JOIN claims ON claims.id = claim_boq_items.claim_id
+ *   WHERE claims.contract_id = :contractId
+ *     AND claims.status IN ('approved','closed')
+ *   GROUP BY item_no
+ *
+ * Returns Record<item_no, sum>. Items absent from approved claims map
+ * to undefined — callers should treat that as 0.
+ */
+export async function fetchPreviousQuantitiesForContract(
+  contractId: string,
+): Promise<ApiResponse<Record<number, number>>> {
+  try {
+    const supabase = createBrowserSupabase();
+
+    // Step 1: fetch IDs of all claims on this contract that have already
+    // been approved or closed. RLS ensures the caller only sees claims
+    // they're authorised on.
+    const { data: closedClaims, error: claimsErr } = await supabase
+      .from('claims')
+      .select('id')
+      .eq('contract_id', contractId)
+      .in('status', ['approved', 'closed']);
+
+    if (claimsErr) throw claimsErr;
+    const claimIds = (closedClaims ?? []).map((c) => c.id);
+    if (claimIds.length === 0) {
+      return createResponse({} as Record<number, number>);
+    }
+
+    // Step 2: fetch BOQ items from those claims and aggregate.
+    const { data: items, error: itemsErr } = await supabase
+      .from('claim_boq_items')
+      .select('item_no, curr_progress')
+      .in('claim_id', claimIds);
+
+    if (itemsErr) throw itemsErr;
+
+    const cumulative: Record<number, number> = {};
+    for (const row of items ?? []) {
+      const itemNo = Number(row.item_no);
+      const prog   = Number(row.curr_progress) || 0;
+      cumulative[itemNo] = (cumulative[itemNo] ?? 0) + prog;
+    }
+    return createResponse(cumulative);
+  } catch (error) {
+    return createErrorResponse(friendlyError(error));
+  }
+}
+
+/**
  * Fetch BOQ items for a claim
  */
 export async function getClaimBOQItems(claimId: string): Promise<ApiResponse<ClaimBOQItem[]>> {

@@ -173,7 +173,16 @@ export function calculateBoqTotal(results: BOQLineResult[]): number {
 }
 
 /**
- * Validate BOQ progress doesn't exceed contractual quantity
+ * Validate BOQ progress doesn't exceed contractual quantity.
+ *
+ * Phase 2.6 / Commit 4 (2026-05-04): the `prevCumulative` argument MUST
+ * be the server-computed cumulative — the same value returned by
+ * `services/claims.ts::fetchPreviousQuantitiesForContract`. The UI is
+ * NOT permitted to override it. If it does (e.g. via DOM tampering),
+ * the server-side RPC `create_claim_with_items_atomic` will recompute
+ * from approved claims and reject the insert with
+ * `CURR_PROGRESS_EXCEEDS_REMAINING`. This client check exists only to
+ * give the user immediate feedback before submit.
  */
 export function validateBoqProgress(
   currProgress: number,
@@ -181,17 +190,28 @@ export function validateBoqProgress(
   contractualQty: number,
   model: BoqProgressModel,
 ): BOQProgressValidation {
+  if (currProgress < 0) {
+    return {
+      valid: false,
+      message: 'الكمية الحالية لا يمكن أن تكون سالبة.',
+    };
+  }
+
   let currentCumulative = currProgress;
 
   if (model === 'count') {
     currentCumulative = prevCumulative + currProgress;
     if (currentCumulative > contractualQty) {
+      const remaining = Math.max(0, contractualQty - prevCumulative);
       return {
         valid: false,
         exceedsContractualQty: true,
         currentCumulative,
         contractualQty,
-        message: `الكميات التراكمية (${currentCumulative}) تتجاوز الكميات المتعاقد عليها (${contractualQty})`,
+        message:
+          `الكمية الحالية (${currProgress}) تتجاوز المتبقي من الكمية التعاقدية. ` +
+          `الكمية المنفذة المعتمدة (محسوبة آلياً): ${prevCumulative} — ` +
+          `الكمية المتبقية: ${remaining} من أصل ${contractualQty}.`,
       };
     }
   }
@@ -200,7 +220,7 @@ export function validateBoqProgress(
     if (currProgress < 0 || currProgress > 100) {
       return {
         valid: false,
-        message: 'نسبة التقدم يجب أن تكون بين 0 و 100%',
+        message: 'نسبة التقدم يجب أن تكون بين 0 و 100%.',
       };
     }
   }

@@ -12,7 +12,12 @@ import ClaimSummaryBox from '@/components/claims/ClaimSummary';
 import InvoiceUpload from '@/components/claims/InvoiceUpload';
 import { useToast } from '@/components/ui/Toast';
 import { fetchContractorContracts } from '@/services/contracts';
-import { fetchClaims, createClaim, submitClaim } from '@/services/claims';
+import {
+  fetchClaims,
+  createClaim,
+  submitClaim,
+  fetchPreviousQuantitiesForContract,
+} from '@/services/claims';
 import { uploadClaimDocument } from '@/services/documents';
 import { loadBOQTemplate, loadStaffTemplate } from '@/services/templates';
 import { calcClaimSummary, type BOQLineResult, type StaffLineResult } from '@/lib/calculations';
@@ -45,6 +50,14 @@ export default function NewClaimPage() {
   const [submitting, setSubmitting] = useState(false);
   const [nextClaimNo, setNextClaimNo] = useState(1);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  /**
+   * Phase 2.6 / Commit 4: server-truth previous BOQ quantities.
+   * Map of item_no → cumulative `curr_progress` across approved claims
+   * for the selected contract. When this map is non-empty, BOQTable
+   * locks the "الكميات المنفذة" column and shows a padlock badge.
+   */
+  const [prevQuantitiesByItem, setPrevQuantitiesByItem] =
+    useState<Record<number, number>>({});
 
   const hideStaff = contract ? isConstructionContract(contract.type as any) : false;
 
@@ -81,6 +94,7 @@ export default function NewClaimPage() {
       setStaffResults([]);
       setBoqTotal(0);
       setStaffTotal(0);
+      setPrevQuantitiesByItem({});
       setLoading(false);
       return;
     }
@@ -92,10 +106,26 @@ export default function NewClaimPage() {
         if (!isConstructionContract(contract!.type as any)) {
           promises.push(loadStaffTemplate(contract!.id));
         }
+        // Phase 2.6 / Commit 4: also fetch the server-truth previous
+        // quantities so the BOQTable can render the prev column locked
+        // and the user sees the same number the server will use to
+        // validate `curr + prev <= contractual_qty`.
+        promises.push(fetchPreviousQuantitiesForContract(contract!.id));
+
         const results = await Promise.all(promises);
         setBoqItems(results[0]);
-        if (results[1]) setStaffItems(results[1]);
-        else setStaffItems([]);
+        const prevQtyResultIndex = isConstructionContract(contract!.type as any) ? 1 : 2;
+        if (!isConstructionContract(contract!.type as any) && results[1]) {
+          setStaffItems(results[1]);
+        } else {
+          setStaffItems([]);
+        }
+        const prevQtyResp = results[prevQtyResultIndex];
+        if (prevQtyResp && prevQtyResp.success && prevQtyResp.data) {
+          setPrevQuantitiesByItem(prevQtyResp.data);
+        } else {
+          setPrevQuantitiesByItem({});
+        }
       } catch (e) {
         console.warn('NewClaim loadTemplates:', e);
       } finally {
@@ -473,7 +503,11 @@ export default function NewClaimPage() {
                     <h4 className="text-[0.82rem] font-bold text-teal-dark">بنود العقد</h4>
                   </div>
                   <CardBody className="p-0">
-                    <BOQTable items={boqItems} onChange={handleBoqChange} />
+                    <BOQTable
+                      items={boqItems}
+                      onChange={handleBoqChange}
+                      prevProgressValues={prevQuantitiesByItem}
+                    />
                   </CardBody>
                 </Card>
               )}
