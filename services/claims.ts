@@ -354,22 +354,33 @@ export async function updateClaim(
 // ─── Claim BOQ & Staff Items ────────────────────────────────────
 
 /**
- * Phase 2.6 / Commit 4 (2026-05-04).
+ * Phase 2.6 / Commit 4 (2026-05-04), tightened by Gap Review Commit C
+ * (2026-05-05) to be APPROVED-ONLY.
  *
  * Returns the server-truth previous quantity (cumulative `curr_progress`
- * across all approved claims) for every BOQ item on a given contract.
+ * across approved claims) for every BOQ item on a given contract.
  *
- * This mirrors EXACTLY what the RPC `create_claim_with_items_atomic`
- * computes on insert — there is no other source of truth. The result
- * feeds `BOQTable.prevProgressValues` so users see the same number the
- * server will use to validate `curr_progress + prev <= contractual_qty`,
- * and the prev column renders LOCKED with a padlock badge.
+ * Canonical aggregation rule (must match the RPC verbatim):
+ *   SUM(curr_progress) FROM claim_boq_items
+ *     JOIN claims ON claims.id = claim_boq_items.claim_id
+ *     WHERE claims.contract_id = :contractId
+ *       AND claims.status = 'approved'
+ *     GROUP BY item_no
  *
- * Aggregation rule: SUM(curr_progress) FROM claim_boq_items
- *   JOIN claims ON claims.id = claim_boq_items.claim_id
- *   WHERE claims.contract_id = :contractId
- *     AND claims.status IN ('approved','closed')
- *   GROUP BY item_no
+ * Why approved-only:
+ *   • The RPC `create_claim_with_items_atomic` (Migration 048, lines
+ *     200-206 and 282-288) aggregates `WHERE c.status = 'approved'` only.
+ *     If this UI pre-fetch added 'closed' to the set, the user would see
+ *     a prev-quantity hint *higher* than the value the server will use
+ *     to validate `curr + prev <= contractual_qty`, leading to confusing
+ *     'why did my claim succeed when the hint said I had less remaining'
+ *     interactions.
+ *   • The open-claim guard (Migration 048, lines 165-177) already prevents
+ *     concurrent in-progress claims on the same contract, so we cannot
+ *     have two open claims fighting for the same remaining quantity.
+ *   • Closed status is reserved for archival / payment-finalised claims;
+ *     by the time a claim reaches 'closed' it has already passed through
+ *     'approved', so the underlying curr_progress is already counted.
  *
  * Returns Record<item_no, sum>. Items absent from approved claims map
  * to undefined — callers should treat that as 0.
@@ -380,14 +391,14 @@ export async function fetchPreviousQuantitiesForContract(
   try {
     const supabase = createBrowserSupabase();
 
-    // Step 1: fetch IDs of all claims on this contract that have already
-    // been approved or closed. RLS ensures the caller only sees claims
-    // they're authorised on.
+    // Step 1: fetch IDs of approved claims on this contract. RLS ensures
+    // the caller only sees claims they are authorised on. Approved-only
+    // here matches the RPC; see JSDoc above for the rationale.
     const { data: closedClaims, error: claimsErr } = await supabase
       .from('claims')
       .select('id')
       .eq('contract_id', contractId)
-      .in('status', ['approved', 'closed']);
+      .eq('status', 'approved');
 
     if (claimsErr) throw claimsErr;
     const claimIds = (closedClaims ?? []).map((c) => c.id);
