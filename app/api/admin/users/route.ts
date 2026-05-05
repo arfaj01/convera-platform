@@ -77,6 +77,43 @@ function roleFromDb(dbRole: string): string {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+/**
+ * IAM-3 (2026-05-05) — canonical ContractRole whitelist.
+ *
+ * Mirrors the ContractRole union in lib/types.ts. The admin routes
+ * validate every incoming `contract_role` value against this list
+ * BEFORE forwarding to the upsert, so a malformed or out-of-spec
+ * value returns 400 with a clear Arabic message instead of a Postgres
+ * enum error that the previous version silently swallowed.
+ */
+const VALID_CONTRACT_ROLES = [
+  'contractor', 'supervisor', 'auditor', 'reviewer',
+  'viewer',     'project_manager', 'quality', 'final_approver',
+] as const;
+
+/**
+ * Validate a contract_roles payload array. Returns null on success or
+ * an Arabic error message on the first invalid entry. Used by both
+ * POST (create) and PATCH (update) to keep validation consistent.
+ */
+function validateContractRolesPayload(
+  rows: Array<{ contract_id?: string; contract_role?: string }> | undefined,
+): string | null {
+  if (!rows || rows.length === 0) return null;
+  for (const row of rows) {
+    if (!row.contract_id || typeof row.contract_id !== 'string') {
+      return 'تعذّر تعيين الأدوار: قيمة contract_id مفقودة أو غير صالحة';
+    }
+    if (!row.contract_role || typeof row.contract_role !== 'string') {
+      return 'تعذّر تعيين الأدوار: قيمة contract_role مفقودة';
+    }
+    if (!(VALID_CONTRACT_ROLES as readonly string[]).includes(row.contract_role)) {
+      return `تعذّر تعيين الأدوار: قيمة contract_role غير معروفة: ${row.contract_role}`;
+    }
+  }
+  return null;
+}
+
 /** Generate a cryptographically safe temporary password */
 function genTempPassword(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
@@ -237,7 +274,32 @@ export async function POST(req: NextRequest) {
   }
 
   // 3b. Insert contract_roles if provided (user_contract_roles table — migration 025+)
+  // IAM-3 (2026-05-05) — fixes:
+  //   (a) Validate every contract_role against the canonical whitelist
+  //       BEFORE issuing the upsert. Previously bad values reached the
+  //       DB and Postgres returned a constraint violation that was
+  //       silently swallowed (see logs/IAM_RBAC_STABILIZATION_AUDIT.md §5.3).
+  //   (b) onConflict target is now the 3-tuple
+  //       (user_id, contract_id, contract_role) — matches the unique
+  //       index added by Migration 045. The previous 2-tuple target
+  //       triggered Postgres 42P10 ('no unique or exclusion constraint
+  //       matching the ON CONFLICT specification') which the previous
+  //       .then(({error}) => console.error(...)) path silently swallowed,
+  //       dropping every contract role at creation time.
+  //   (c) Errors are now returned to the caller as 422 instead of being
+  //       logged-and-forgotten, so the modal (post IAM-2) can show a
+  //       clear Arabic toast and the operator can correct the data.
   if (contract_roles && contract_roles.length > 0) {
+    const validationErr = validateContractRolesPayload(contract_roles);
+    if (validationErr) {
+      // The auth user + profile have already been created by this point;
+      // returning here leaves the user in a half-provisioned state. Roll
+      // back the auth user to keep the failure atomic from the caller's
+      // perspective. Profile rows cascade-delete from auth.users.
+      await admin.auth.admin.deleteUser(newUserId);
+      return NextResponse.json({ error: validationErr }, { status: 400 });
+    }
+
     const crRows = contract_roles.map((cr: ContractRoleInput) => ({
       user_id:       newUserId,
       contract_id:   cr.contract_id,
@@ -246,14 +308,21 @@ export async function POST(req: NextRequest) {
       assigned_by:   actor.id,
       notes:         `تعيين أولي عند إنشاء المستخدم`,
     }));
-    await admin
+    const { error: crErr } = await admin
       .from('user_contract_roles')
-      .upsert(crRows, { onConflict: 'user_id,contract_id' })
-      .then(({ error }) => {
-        if (error && error.code !== '42P01' && error.code !== '23505') {
-          console.error('[user_contract_roles] POST insert error:', error);
-        }
-      });
+      .upsert(crRows, { onConflict: 'user_id,contract_id,contract_role' });
+
+    if (crErr && crErr.code !== '42P01' && crErr.code !== '23505') {
+      console.error('[user_contract_roles] POST insert error:', crErr);
+      // Roll back the auth user to keep the operation atomic from the
+      // caller's perspective. Without this rollback the modal would
+      // succeed-then-fail and leave a user with no roles in the DB.
+      await admin.auth.admin.deleteUser(newUserId);
+      return NextResponse.json(
+        { error: `فشل تعيين أدوار العقود للمستخدم: ${crErr.message}` },
+        { status: 422 },
+      );
+    }
   }
 
   // 4. Send password reset email so user sets their own password

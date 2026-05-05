@@ -180,6 +180,35 @@ async function syncContractRoles(
   if (upsertErr && upsertErr.code !== '23505') throw upsertErr;
 }
 
+// ── Validation helper (IAM-3, 2026-05-05) ─────────────────────────
+// Mirrors the helper in app/api/admin/users/route.ts. Validates every
+// contract_role payload entry against the canonical ContractRole
+// whitelist BEFORE the upsert, so a malformed value returns 400 with
+// a clear Arabic message instead of being silently swallowed (see
+// logs/IAM_RBAC_STABILIZATION_AUDIT.md §5.3).
+const VALID_CONTRACT_ROLES_PATCH = [
+  'contractor', 'supervisor', 'auditor', 'reviewer',
+  'viewer',     'project_manager', 'quality', 'final_approver',
+] as const;
+
+function validateContractRolesPayloadPatch(
+  rows: Array<{ contract_id?: string; contract_role?: string }> | undefined,
+): string | null {
+  if (!rows || rows.length === 0) return null;
+  for (const row of rows) {
+    if (!row.contract_id || typeof row.contract_id !== 'string') {
+      return 'تعذّر تعيين الأدوار: قيمة contract_id مفقودة أو غير صالحة';
+    }
+    if (!row.contract_role || typeof row.contract_role !== 'string') {
+      return 'تعذّر تعيين الأدوار: قيمة contract_role مفقودة';
+    }
+    if (!(VALID_CONTRACT_ROLES_PATCH as readonly string[]).includes(row.contract_role)) {
+      return `تعذّر تعيين الأدوار: قيمة contract_role غير معروفة: ${row.contract_role}`;
+    }
+  }
+  return null;
+}
+
 // ── PATCH /api/admin/users/[id] ───────────────────────────────────
 
 export async function PATCH(
@@ -208,6 +237,14 @@ export async function PATCH(
     return NextResponse.json({ error: `دور غير صالح: ${body.role}` }, { status: 400 });
   }
 
+  // IAM-3 — validate contract_roles payload BEFORE running any DB write
+  if (body.contract_roles !== undefined) {
+    const validationErr = validateContractRolesPayloadPatch(body.contract_roles);
+    if (validationErr) {
+      return NextResponse.json({ error: validationErr }, { status: 400 });
+    }
+  }
+
   const admin = createAdminSupabase();
 
   // Fetch current state for audit diff
@@ -232,7 +269,13 @@ export async function PATCH(
   updates.updated_at = new Date().toISOString();
 
   const hasProfileChanges = Object.keys(updates).length > 1; // more than just updated_at
-  const hasContractChanges = body.linked_contract_ids !== undefined;
+  // IAM-3 (2026-05-05) — `hasContractChanges` previously checked only
+  // linked_contract_ids and missed payloads that touch contract_roles
+  // alone. Both fields participate in the contract-side update; either
+  // one being defined is a real change.
+  const hasContractChanges =
+    body.linked_contract_ids !== undefined ||
+    body.contract_roles      !== undefined;
 
   if (!hasProfileChanges && !hasContractChanges) {
     return NextResponse.json({ error: 'لا توجد تغييرات للحفظ' }, { status: 400 });
@@ -279,12 +322,18 @@ export async function PATCH(
   }
 
   // ── Sync linked contracts (when field is explicitly provided) ────
+  // IAM-3 (2026-05-05) — failures here used to be caught and logged so
+  // the API still returned 200 even when role-side persistence broke.
+  // Post-IAM-2 the modal surfaces these errors in a toast, so the
+  // operator gets visibility instead of a "saved but didn't save" state.
   if (body.linked_contract_ids !== undefined) {
     try {
       await syncLinkedContracts(targetId, body.linked_contract_ids);
     } catch (syncErr) {
-      // Non-fatal: log but don't fail the whole update
       console.error('[user-contracts] sync error:', syncErr);
+      const msg = (syncErr as { message?: string } | null)?.message
+        || 'فشل مزامنة العقود المرتبطة';
+      return NextResponse.json({ error: msg }, { status: 422 });
     }
   }
 
@@ -294,6 +343,9 @@ export async function PATCH(
       await syncContractRoles(targetId, body.contract_roles, actor.id);
     } catch (syncErr) {
       console.error('[user_contract_roles] sync error:', syncErr);
+      const msg = (syncErr as { message?: string } | null)?.message
+        || 'فشل تعيين أدوار العقود للمستخدم';
+      return NextResponse.json({ error: msg }, { status: 422 });
     }
   }
 
