@@ -207,11 +207,15 @@ export default function NewClaimPage() {
     if (periodFrom && periodTo && periodFrom > periodTo) {
       errors.push('تاريخ البداية يجب أن يكون قبل تاريخ النهاية');
     }
-    if (!refNo.trim()) errors.push('يجب إدخال الرقم المرجعي (اعتماد)');
+    // Phase 2.6 / Gap Review (2026-05-05): the external reference
+    // (الرقم المرجعي الخارجي — منصة اعتماد) is OPTIONAL on the API
+    // (`external_reference?: string | null` in /api/claims/create) and
+    // is issued by اعتماد *after* internal approval. The UI must not
+    // block contractors who don't yet have a reference number.
     const hasCurrQty = boqResults.some(r => r.currQty > 0);
     const hasStaffProgress = !hideStaff && staffResults.some(r => r.workingDays > 0);
     if (!hasCurrQty && !hasStaffProgress) {
-      errors.push('يجب إدخال الكميات الحالية (جاري) لبند واحد على الأقل');
+      errors.push('يجب إدخال الكمية الحالية لبند واحد على الأقل');
     }
     if (boqHasErrors) {
       errors.push('يوجد تجاوز في كميات بنود الأعمال — يرجى تصحيح القيم المظللة بالأحمر');
@@ -482,6 +486,20 @@ export default function NewClaimPage() {
               <h4 className="text-[0.82rem] font-bold text-teal-dark">بيانات الفترة</h4>
             </div>
             <CardBody>
+              {/* Phase 2.6 / Gap Review (2026-05-05): inform the user that the
+                  system issues claim_number on save — they no longer have to
+                  enter it manually. Format and example mirror the resolver in
+                  lib/claim-number.ts and the RPC in Migration 048. */}
+              <div className="mb-3 p-2.5 rounded-md bg-[#E8F4F4] border border-[#045859]/15 flex items-start gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#045859" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0 mt-0.5" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 16v-4" />
+                  <path d="M12 8h.01" />
+                </svg>
+                <p className="text-[0.7rem] leading-relaxed text-[#045859]">
+                  سيتم توليد رقم المطالبة تلقائيًا بعد الحفظ بالصيغة <span className="font-bold tabular-nums">&lt;كود المشروع&gt;&lt;نوع المطالبة&gt;&lt;YYMMDD&gt;-&lt;التسلسل&gt;</span>. مثال: <span className="font-bold tabular-nums">CMH01R260504-001</span>.
+                </p>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 {/* Phase 2.6 / Commit 5: claim_kind dropdown — feeds the
                     single-letter code (R/F/A) embedded in claim_number */}
@@ -525,13 +543,21 @@ export default function NewClaimPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">الرقم المرجعي (اعتماد) <span className="text-red">*</span></label>
+                  {/* Phase 2.6 / Gap Review (2026-05-05): renamed and demoted to
+                      optional. The اعتماد reference is issued *after* internal
+                      approval, so blocking the contractor on this field
+                      contradicts the actual operational sequence. Backend already
+                      accepts it as nullable (route.ts CreateClaimRequest
+                      .external_reference, Migration 048 NULLIF on insert). */}
+                  <label className="block text-xs font-bold text-gray-600 mb-1">
+                    الرقم المرجعي الخارجي <span className="text-gray-400 font-normal">(اختياري — منصة اعتماد)</span>
+                  </label>
                   <input
                     type="text"
                     value={refNo}
                     onChange={e => { setRefNo(e.target.value); setValidationErrors([]); }}
-                    placeholder="مطلوب"
-                    className={`w-full px-2.5 py-2 border-[1.5px] ${!refNo.trim() && hasErrors ? 'border-red/40' : 'border-gray-100'} rounded-sm text-sm font-sans bg-gray-50 text-right focus:border-teal focus:outline-none`}
+                    placeholder="اختياري — يُملأ بعد الاعتماد"
+                    className="w-full px-2.5 py-2 border-[1.5px] border-gray-100 rounded-sm text-sm font-sans bg-gray-50 text-right focus:border-teal focus:outline-none"
                   />
                 </div>
               </div>
