@@ -1,6 +1,7 @@
 # Auto-numbered Claim Submission — Phase 2.6 Runbook
 
 > **Status:** shipped 2026-05-04 across Migrations 047 + 048 and code commits feat(db)…feat(claims)…feat(ui)…
+> **Gap Review:** 2026-05-05 — UI corrections landed in commits A–D (see [CLAIM_ENHANCEMENT_GAP_REVIEW.md](./CLAIM_ENHANCEMENT_GAP_REVIEW.md)).
 > **Audience:** Engineering, Auditors, Reviewers, Final Approver, Director.
 > **Scope:** the new-claim flow on the contractor side. The Phase 2.6 workflow engine (supervisor → reviewer → quality → PM → final approver) is unchanged.
 
@@ -14,10 +15,18 @@ The new-claim form (`/claims/new`) now:
    - مستخلص جاري — running payment (default).
    - مستخلص ختامي — final payment.
    - دفعة مقدمة — advance payment.
-2. Renames the period inputs to **فترة تنفيذ الأعمال — من / إلى** (matches the Migration 047 column names `work_period_from` / `work_period_to`).
-3. Auto-fills the **الكميات المنفذة** column on every BOQ row from approved claims and locks it with a padlock badge — the user can no longer edit the prev quantity.
-4. Surfaces the server-issued **رقم المطالبة** (e.g. `CMH01R260504-001`) in the success toast and the claim detail page header, replacing the local `#<claim_no>` integer.
-5. Blocks creating a new claim while a previous claim on the same contract is still open (anything other than approved / rejected / cancelled / closed).
+2. Displays an info banner above the period inputs announcing that the system issues `claim_number` automatically on save, with the format `<كود المشروع><نوع المطالبة><YYMMDD>-<التسلسل>` and the example `CMH01R260504-001` (Gap Review Commit A).
+3. Renames the period inputs to **فترة تنفيذ الأعمال — من / إلى** (matches the Migration 047 column names `work_period_from` / `work_period_to`).
+4. Renames the BOQ table headers to the canonical Arabic terminology (Gap Review Commit B):
+   - الكميات المنفذة → **الكمية السابقة**
+   - الكميات الحالية (جاري) → **الكمية الحالية**
+   - المستحق الجاري → **قيمة المستخلص الحالي**
+   - المبلغ الإجمالي → **القيمة التراكمية**
+   - Footer إجمالي تكلفة الفاتورة الحالية (جاري) → **إجمالي قيمة المستخلص الحالي**
+5. Locks the **الكمية السابقة** column **unconditionally** with a padlock badge — even on contracts that have no approved claims yet (where the value is `0`). Previously the column was only locked when prior approved claims existed; the API silently stripped any client-sent value, so the editable input had been UI theatre. Single source of truth is now the server, end-to-end (Gap Review Commit B, item D7).
+6. Demotes the اعتماد reference number to an OPTIONAL field labelled **الرقم المرجعي الخارجي (اختياري — منصة اعتماد)**. The reference is issued by اعتماد *after* internal approval, so blocking the contractor on it at submit-time contradicted the operational sequence (Gap Review Commit A, item B2).
+7. Surfaces the server-issued **رقم المطالبة** (e.g. `CMH01R260504-001`) in the success toast and the claim detail page header, replacing the local `#<claim_no>` integer.
+8. Blocks creating a new claim while a previous claim on the same contract is still open (anything other than approved / rejected / cancelled / closed).
 
 ---
 
@@ -62,6 +71,29 @@ In one transaction it:
 9. Returns `{id, claim_no, claim_number, claim_sequence, claim_kind, status: 'draft'}`.
 
 Any `RAISE EXCEPTION` aborts the whole transaction — there is no partial state to clean up.
+
+### 3.1 Canonical previous-quantity aggregation rule
+
+The **single canonical rule** for `previous_quantity` is:
+
+```sql
+SUM(curr_progress) FROM claim_boq_items cb
+  JOIN claims c ON c.id = cb.claim_id
+ WHERE c.contract_id = :contract_id
+   AND c.status      = 'approved'
+ GROUP BY cb.item_no
+```
+
+Approved-only — never `closed`, never `pending_*`, never `returned_by_*`. The
+RPC computes this on every insert (Migration 048 lines 200-206 and 282-288)
+and the UI pre-fetch in `services/claims.ts::fetchPreviousQuantitiesForContract`
+is now byte-identical (Gap Review Commit C, item E11). The open-claim guard
+prevents concurrent in-progress claims on the same contract, so we cannot
+have two open claims racing for the same remaining quantity.
+
+If a future spec change wants `closed` claims to count, edit *both* the RPC
+(via a new Migration 049 — never edit a shipped migration in place) and the
+UI service in the same commit. Do not let the two diverge.
 
 ---
 
@@ -146,13 +178,27 @@ Code commits revert in reverse order: ui → claims → api → db. The UI code 
 
 ## 6. Smoke test (manual, pre-staging)
 
-Run as the contractor user `cmh01.contractor@convera.test` on test database:
+Run as the contractor user `cmh01.contractor@convera.test` on test database. Before starting, confirm Migrations 047 and 048 are applied (run VAL-1 of each migration, see migration headers).
 
 1. Sign in and navigate to `/claims/new`.
 2. Confirm contract `CMH_01-C01` is auto-selected.
 3. Confirm the new dropdown labelled **نوع المطالبة** is present above the period inputs and defaults to **مستخلص جاري**.
-4. Confirm the BOQ rows show **الكميات المنفذة** with values from prior approved claims and a padlock badge — the field cannot be edited.
-5. Pick **مستخلص جاري**, fill the period dates, enter a curr-progress value, and save as draft.
-6. Expect success toast **`تم حفظ مسودة المطالبة CMH01R260504-001 بنجاح`** (date will vary).
-7. Navigate to the claim detail page and confirm the header reads **`مطالبة CMH01R260504-001`**, the **بيانات المطالبة** card shows **رقم المطالبة**, **نوع المطالبة = مستخلص جاري**, and **فترة التنفيذ — من / إلى** is populated.
-8. Without submitting, return to `/claims/new` and try to create a second claim on the same contract — expect 422 Arabic error citing the open claim.
+4. Confirm the auto-number info banner is visible inside the **بيانات الفترة** card body, with the copy "سيتم توليد رقم المطالبة تلقائيًا بعد الحفظ بالصيغة …" and the example `CMH01R260504-001`.
+5. Confirm the **الرقم المرجعي الخارجي** field is rendered as `(اختياري — منصة اعتماد)` with NO red asterisk. Try saving a draft with this field empty — expect 200 (no Arabic error citing the reference number).
+6. Confirm the BOQ table header reads exactly: `# / البند / سعر الوحدة / الكمية التعاقدية / الكمية السابقة / الكمية الحالية / نسبة الإنجاز / قيمة المستخلص الحالي / القيمة التراكمية`.
+7. Confirm the **الكمية السابقة** cell is non-interactive on every row, displays a padlock badge with tooltip *محسوب تلقائياً من المطالبات المعتمدة*, and shows `0` for the very first claim on a contract or the matching cumulative value otherwise.
+8. Confirm the BOQ footer reads **إجمالي قيمة المستخلص الحالي** (no longer "إجمالي تكلفة الفاتورة الحالية (جاري)").
+9. Pick **مستخلص جاري**, fill the period dates, enter a curr-progress value, and save as draft.
+10. Expect success toast **`تم حفظ مسودة المطالبة CMH01R260504-001 بنجاح`** (date will vary).
+11. Navigate to the claim detail page and confirm the header reads **`مطالبة CMH01R260504-001`**, the **بيانات المطالبة** card shows **رقم المطالبة**, **نوع المطالبة = مستخلص جاري**, and **فترة التنفيذ — من / إلى** is populated.
+12. Without submitting, return to `/claims/new` and try to create a second claim on the same contract — expect 422 Arabic error citing the open claim.
+
+---
+
+## 7. Known follow-ups (post Gap Review)
+
+These were surfaced by the audit on 2026-05-05 and intentionally deferred — they do not block the new-claim flow:
+
+1. **Cumulative amount as a stored column** (Gap Review item E7). `claim_boq_items.cumulative` carries the cumulative quantity but not the cumulative monetary amount. The amount is reproducible as `cumulative * unit_price`, but reports that need a single column would benefit from a generated column. Schedule for a future Migration 049+ if/when a report consumer asks for it.
+2. **Better Arabic error for "RPC missing"** (Gap Review item G9). If Migration 048 is somehow not applied in production, every save returns the generic `حدث خطأ غير متوقع`. A pre-flight `to_regprocedure('public.create_claim_with_items_atomic(...)')` ping in `/api/claims/create` would distinguish "RPC absent" from other errors and surface a clear migration-required message. Low priority — production-deploy automation should ensure migrations apply before code rolls.
+3. **Route BOQTable headers through `lib/field-labels.ts`** so future label renames live in one place. The canonical labels for `prev_progress` and `curr_progress` already exist there (rows 74-75); the table currently inlines literals.
