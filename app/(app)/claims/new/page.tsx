@@ -23,7 +23,19 @@ import { loadBOQTemplate, loadStaffTemplate } from '@/services/templates';
 import { calcClaimSummary, type BOQLineResult, type StaffLineResult } from '@/lib/calculations';
 import { isConstructionContract } from '@/lib/constants';
 import { friendlyError } from '@/lib/errors';
-import type { ContractView, BOQFormItem, StaffFormItem } from '@/lib/types';
+import type { ClaimKind, ContractView, BOQFormItem, StaffFormItem } from '@/lib/types';
+
+/**
+ * Phase 2.6 / Commit 5 (2026-05-04). Display labels for the
+ * `claim_kind` dropdown, in form order. Order matches the spec:
+ * running_payment is the default (most common); final_payment closes
+ * out a contract; advance_payment is the optional advance at start.
+ */
+const CLAIM_KIND_OPTIONS: ReadonlyArray<{ value: ClaimKind; label: string }> = [
+  { value: 'running_payment', label: 'مستخلص جاري' },
+  { value: 'final_payment',   label: 'مستخلص ختامي' },
+  { value: 'advance_payment', label: 'دفعة مقدمة' },
+];
 
 export default function NewClaimPage() {
   const router = useRouter();
@@ -45,6 +57,14 @@ export default function NewClaimPage() {
   const [periodFrom, setPeriodFrom] = useState('');
   const [periodTo, setPeriodTo] = useState('');
   const [refNo, setRefNo] = useState('');
+  /**
+   * Phase 2.6 / Commit 5: payment-cycle classifier exposed via the
+   * dropdown above the period fields. Default 'running_payment' to
+   * match the spec's most-common case. Persisted on the claim row
+   * (Migration 047) and embedded as the single-letter kind code in
+   * the server-issued claim_number ('R' / 'F' / 'A').
+   */
+  const [claimKind, setClaimKind] = useState<ClaimKind>('running_payment');
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -155,6 +175,7 @@ export default function NewClaimPage() {
       setPeriodFrom('');
       setPeriodTo('');
       setRefNo('');
+      setClaimKind('running_payment');
       setInvoiceFile(null);
       setValidationErrors([]);
     }
@@ -271,17 +292,16 @@ export default function NewClaimPage() {
     try {
       const { boqRows, staffRows, claimType } = buildPayload();
 
-      // Phase 2.6 / Commit 3: createClaim delegates to /api/claims/create.
+      // Phase 2.6 / Commit 5: createClaim delegates to /api/claims/create.
       // The server allocates claim_no + claim_number under advisory lock,
       // recomputes prev_progress from approved claims, and enforces the
       // open-claim guard. The client is no longer the source of truth
-      // for any of those fields. Commit 5 will surface a proper UI
-      // dropdown for `claimKind` and explicit work-period inputs; until
-      // then we default to `running_payment` and reuse the existing
-      // periodFrom / periodTo state as the work-period range.
+      // for any of those fields. claimKind is now sourced from the new
+      // dropdown above the period fields; periodFrom / periodTo carry
+      // the work-period range exactly as the user entered them.
       const claim = await createClaim({
         contractId:         contract.id,
-        claimKind:          'running_payment',
+        claimKind,
         claimType,
         workPeriodFrom:     periodFrom,
         workPeriodTo:       periodTo,
@@ -306,8 +326,14 @@ export default function NewClaimPage() {
         }
       }
 
+      // Phase 2.6 / Commit 5: surface the server-issued claim_number
+      // (e.g. "CMH01R260504-001") in the success toast — this is the
+      // identifier the user will quote in اعتماد and emails. The local
+      // `nextClaimNo` hint becomes a fallback only.
+      const issuedNumber = claim?.data?.claim_number || `#${nextClaimNo}`;
+
       if (asDraft) {
-        showToast(`تم حفظ المسودة #${nextClaimNo} بنجاح`, 'ok');
+        showToast(`تم حفظ مسودة المطالبة ${issuedNumber} بنجاح`, 'ok');
         setTimeout(() => router.push('/claims'), 1000);
         return;
       }
@@ -319,7 +345,7 @@ export default function NewClaimPage() {
         return;
       }
 
-      showToast(`تم تقديم المطالبة #${nextClaimNo} بنجاح`, 'ok');
+      showToast(`تم تقديم المطالبة ${issuedNumber} بنجاح`, 'ok');
       setTimeout(() => router.push('/claims'), 1000);
     } catch (e) {
       showToast(friendlyError(e), 'error');
@@ -449,16 +475,37 @@ export default function NewClaimPage() {
       {/* ── Remaining form (only shown after contract is selected) ── */}
       {contractSelected ? (
         <>
-          {/* Step: Period + Reference */}
+          {/* Step: Period + Reference + Claim Kind (Phase 2.6 / Commit 5) */}
           <Card className="mb-3">
             <div className="p-3 bg-teal-ultra border-b border-gray-100 rounded-t flex items-center gap-2">
               <div className="w-[22px] h-[22px] rounded-full bg-teal text-white flex items-center justify-center text-[0.65rem] font-extrabold flex-shrink-0">{stepPeriod}</div>
               <h4 className="text-[0.82rem] font-bold text-teal-dark">بيانات الفترة</h4>
             </div>
             <CardBody>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* Phase 2.6 / Commit 5: claim_kind dropdown — feeds the
+                    single-letter code (R/F/A) embedded in claim_number */}
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">الفترة من <span className="text-red">*</span></label>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">
+                    نوع المطالبة <span className="text-red">*</span>
+                  </label>
+                  <select
+                    value={claimKind}
+                    onChange={e => { setClaimKind(e.target.value as ClaimKind); setValidationErrors([]); }}
+                    className="w-full px-2.5 py-2 border-[1.5px] border-gray-100 rounded-sm text-sm font-sans bg-gray-50 focus:border-teal focus:outline-none"
+                  >
+                    {CLAIM_KIND_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[0.62rem] text-gray-400 mt-1 leading-tight">
+                    يُدمج رمز النوع (R/F/A) في رقم المطالبة المُولَّد
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">
+                    فترة تنفيذ الأعمال — من <span className="text-red">*</span>
+                  </label>
                   <input
                     type="date"
                     value={periodFrom}
@@ -467,7 +514,9 @@ export default function NewClaimPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1">الفترة إلى <span className="text-red">*</span></label>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">
+                    فترة تنفيذ الأعمال — إلى <span className="text-red">*</span>
+                  </label>
                   <input
                     type="date"
                     value={periodTo}
