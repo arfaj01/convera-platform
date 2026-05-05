@@ -18,7 +18,7 @@ import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { getAuthHeaders } from '@/lib/supabase';
-import type { ClaimStatus } from '@/lib/types';
+import type { ClaimStatus, ContractRole } from '@/lib/types';
 import {
   type ClaimAction,
   type ActionContext,
@@ -31,12 +31,23 @@ interface WorkflowActionsProps {
   claimId: string;
   /** Full action context — replaces individual status/role props */
   actionContext: ActionContext;
+  /**
+   * Multi-role fix (2026-05-05) — the contract role the user has
+   * selected via the role-chip strip on the claim detail page. When
+   * present this value is forwarded as `actor_role` in the transition
+   * request body. The server validates it against user_contract_roles
+   * before using it (frontend is never trusted blindly). Optional for
+   * backward compatibility — when omitted, the server falls back to
+   * the legacy single-role resolution path.
+   */
+  activeRole?: ContractRole | null;
   onActionComplete: () => void;
 }
 
 export default function WorkflowActions({
   claimId,
   actionContext,
+  activeRole,
   onActionComplete,
 }: WorkflowActionsProps) {
   const { showToast } = useToast();
@@ -76,6 +87,15 @@ export default function WorkflowActions({
         action: action.workflowAction,
         notes,
       };
+
+      // Multi-role fix (2026-05-05) — surface the user's selected
+      // contract role to /api/claims/transition. The server validates
+      // it against user_contract_roles before trusting it; if invalid,
+      // the route returns 403 with a clear Arabic message. Omitted
+      // when the page didn't pass an activeRole (single-role fallback).
+      if (activeRole) {
+        body.actor_role = activeRole;
+      }
 
       // Map canonical field names for return/reject reasons
       if (action.type === 'return') {

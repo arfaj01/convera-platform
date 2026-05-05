@@ -50,6 +50,22 @@ const CONTRACT_ROLE_LABELS: Record<ContractRole, string> = {
   final_approver:  'الاعتماد النهائي',
 };
 
+// Multi-role fix (2026-05-05) — when the user holds multiple contract
+// roles on this claim's contract, default activeRole to the role
+// that currently has business at this stage. Mirror of the
+// allowedRoles in lib/workflow-engine.ts CLAIM_TRANSITIONS for the
+// six gating stages. If the user does not hold the suggested role we
+// fall back to the first role they DO hold — so single-role users
+// preserve their existing behaviour exactly.
+const STAGE_DEFAULT_ROLE: Partial<Record<string, ContractRole>> = {
+  under_supervisor_review:      'supervisor',
+  under_auditor_review:         'auditor',
+  under_reviewer_check:         'reviewer',
+  under_technical_review:       'reviewer',
+  under_quality_review:         'quality',
+  under_project_manager_review: 'project_manager',
+};
+
 export default function ClaimDetailPage() {
   const params = useParams();
   const { profile } = useAuth();
@@ -67,6 +83,13 @@ export default function ClaimDetailPage() {
   // Backward-compat single-role accessor for downstream consumers that
   // still expect one value (e.g. AttachmentsCard / filterVisibleDocuments).
   const contractRole: ContractRole | null = contractRoles[0] ?? null;
+  // Multi-role fix (2026-05-05) — the role the user has selected to
+  // act with on this claim. For users with one role this defaults to
+  // that role and never changes. For users with multiple roles, the
+  // chip strip below sets it on click; the value is forwarded to
+  // /api/claims/transition as `actor_role`, which the server validates
+  // against user_contract_roles before using it.
+  const [activeRole, setActiveRole] = useState<ContractRole | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
@@ -92,6 +115,18 @@ export default function ClaimDetailPage() {
         const deduped: ContractRole[] = [];
         for (const r of matched) if (!deduped.includes(r)) deduped.push(r);
         setContractRoles(deduped);
+
+        // Multi-role fix (2026-05-05) — pick the most appropriate
+        // default activeRole for the claim's current stage. If the
+        // user holds a role that matches the stage's gate, prefer
+        // that; otherwise fall back to the first role in the list
+        // (legacy single-role behaviour).
+        const stageDefault = STAGE_DEFAULT_ROLE[c.status as string] ?? null;
+        const initialRole: ContractRole | null =
+          (stageDefault && deduped.includes(stageDefault))
+            ? stageDefault
+            : (deduped[0] ?? null);
+        setActiveRole(initialRole);
       }
       setBoqItems(boq);
       setStaffItems(staff);
@@ -193,22 +228,38 @@ export default function ClaimDetailPage() {
           contractRoles is rendered as the "primary" pill (filled teal);
           additional roles are outlined. Hidden for global-role directors
           (they have implicit access via isGlobalRole). */}
+      {/* Multi-role fix (2026-05-05) — the role chips are now CLICKABLE
+          buttons. For users with multiple roles on this contract, the
+          chip the user selects becomes activeRole, which is forwarded
+          to /api/claims/transition as `actor_role` and validated
+          server-side. Single-role users see one button which is already
+          selected and clicking is a no-op. Hidden for global directors
+          (they have implicit access via isGlobalRole). */}
       {!isDirector && contractRoles.length > 0 && (
         <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-teal-pale border border-teal/20 rounded-sm text-xs">
-          <span className="text-teal-dark font-bold flex-shrink-0">الأدوار:</span>
+          <span className="text-teal-dark font-bold flex-shrink-0">
+            الأدوار{contractRoles.length > 1 ? ' — اختر دور التنفيذ' : ''}:
+          </span>
           <div className="flex gap-1.5 flex-wrap">
-            {contractRoles.map((role, idx) => (
-              <span
-                key={role}
-                className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-bold ${
-                  idx === 0
-                    ? 'bg-teal text-white'
-                    : 'bg-white text-teal-dark border border-teal/30'
-                }`}
-              >
-                {CONTRACT_ROLE_LABELS[role] ?? role}
-              </span>
-            ))}
+            {contractRoles.map((role) => {
+              const isSelected = activeRole === role;
+              return (
+                <button
+                  type="button"
+                  key={role}
+                  onClick={() => setActiveRole(role)}
+                  aria-pressed={isSelected}
+                  title={contractRoles.length > 1 ? 'اختر هذا الدور لتنفيذ الإجراء' : undefined}
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.7rem] font-bold transition-colors ${
+                    isSelected
+                      ? 'bg-teal text-white'
+                      : 'bg-white text-teal-dark border border-teal/30 hover:bg-teal/5 cursor-pointer'
+                  }`}
+                >
+                  {CONTRACT_ROLE_LABELS[role] ?? role}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -364,6 +415,7 @@ export default function ClaimDetailPage() {
             <WorkflowActions
               claimId={claimId}
               actionContext={actionContext}
+              activeRole={activeRole}
               onActionComplete={loadData}
             />
           )}

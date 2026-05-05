@@ -64,6 +64,17 @@ interface TransitionRequest {
    * always comes from the matched TransitionDef.toStatus.
    */
   to_status?: ClaimStatus;
+  /**
+   * Multi-role fix (2026-05-05) — when the user holds more than one
+   * active contract role on this claim's contract (e.g. reviewer +
+   * quality), the UI sends the role the user explicitly selected via
+   * the role-chip strip on the claim detail page. The server REQUIRES
+   * this role to be active for the user on the contract before using
+   * it (validated against user_contract_roles). When omitted, the
+   * server falls back to the legacy single-role resolution path so
+   * single-role users continue to work without UI changes.
+   */
+  actor_role?: ContractRole;
 }
 
 interface TransitionResponse {
@@ -378,14 +389,52 @@ export async function POST(request: NextRequest): Promise<NextResponse<Transitio
     const userRole = profile.role as UserRole;
 
     // Step 4: Contract-scoped role resolution (Sprint B: dual-read)
-    const { role: contractRole, source: roleSource } = await resolveContractRole(
+    // Note: resolveContractRole uses .maybeSingle() under the hood — when
+    // a user holds multiple active roles on the same contract it cannot
+    // pick the right one for the current stage. The block immediately
+    // below overrides the resolution with a client-supplied + server-
+    // validated `actor_role` for those multi-role cases. Single-role
+    // users skip the override and the legacy resolution stands.
+    let { role: contractRole, source: roleSource } = await resolveContractRole(
       adminClient, actorId, claim.contract_id, userRole,
     );
+
+    // Multi-role fix (2026-05-05) — honour the user's selected contract
+    // role when supplied, AFTER verifying it is a real active role for
+    // this user on this contract. Frontend is never trusted blindly.
+    const requestedActorRole = body.actor_role as ContractRole | undefined;
+    if (requestedActorRole && !isGlobalRole(userRole)) {
+      const { count: requestedRoleCount, error: requestedRoleErr } = await adminClient
+        .from('user_contract_roles')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id',       actorId)
+        .eq('contract_id',   claim.contract_id)
+        .eq('contract_role', requestedActorRole)
+        .eq('is_active',     true);
+
+      if (requestedRoleErr) {
+        console.error('[claims/transition] actor_role validation error:', requestedRoleErr);
+        return errorResponse('فشل التحقق من دور المستخدم على هذا العقد', 500);
+      }
+      if ((requestedRoleCount ?? 0) === 0) {
+        return errorResponse(
+          `الدور المُحدَّد (${requestedActorRole}) غير مُفعَّل لك على هذا العقد. ` +
+          `لا يمكنك تنفيذ هذا الإجراء بهذا الدور.`,
+          403,
+        );
+      }
+      // Trusted: override the legacy single-role result so every
+      // downstream check (transition allow-list, return allow-list,
+      // notification routing) operates on the user's chosen role.
+      contractRole = requestedActorRole;
+      roleSource   = 'new_table';
+    }
 
     console.debug(
       `[claims/transition] user=${actorId} contract=${claim.contract_id} ` +
       `action=${action} status=${claim.status} ` +
-      `contractRole=${contractRole} source=${roleSource}`,
+      `contractRole=${contractRole} source=${roleSource} ` +
+      `requestedActorRole=${requestedActorRole ?? '<none>'}`,
     );
 
     // Step 4b: Contract scope enforcement (dual-read)
