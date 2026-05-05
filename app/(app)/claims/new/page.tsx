@@ -319,7 +319,44 @@ export default function NewClaimPage() {
       });
 
       const claimId = claim?.data?.id;
-      if (!claimId) throw new Error('فشل في إنشاء المطالبة');
+      if (!claimId) {
+        // Stabilization S1 (2026-05-05): preserve the structured Arabic
+        // error from /api/claims/create. The route maps RPC exceptions
+        // (OPEN_CLAIM_EXISTS, CURR_PROGRESS_EXCEEDS_REMAINING,
+        // PROJECT_CODE_REQUIRED, WORK_PERIOD_ORDER, …) to user-grade
+        // Arabic copy in `result.error`. Earlier this code threw a
+        // generic Error which friendlyError() could not pattern-match,
+        // so the user always saw the catch-all
+        // 'حدث خطأ غير متوقع …' toast — see
+        // logs/STABILIZATION_AUDIT_REPORT.md §6 for the full diagnosis.
+        // Field fallbacks accommodate both the CURRENT ApiResponse<T>
+        // shape (`error: string`) and the FUTURE
+        // `{ code, messageAr, details }` contract proposed in S2 — so
+        // this code does not need to change again when S2 lands.
+        const c = claim as unknown as {
+          messageAr?: string;
+          message?: string;
+          error?: string | { messageAr?: string; message?: string };
+        };
+        const apiMessage =
+          c?.messageAr
+          || (typeof c?.error === 'object' ? c.error?.messageAr : undefined)
+          || (typeof c?.error === 'string' ? c.error : undefined)
+          || (typeof c?.error === 'object' ? c.error?.message : undefined)
+          || c?.message
+          || 'فشل في إنشاء المطالبة';
+        // Console-log a non-secret diagnostic snapshot. The `claim`
+        // object only carries the API response body — no headers, no
+        // env values — so this is safe even in production builds.
+        // eslint-disable-next-line no-console
+        console.warn('[claims/new] createClaim failed:', {
+          hasData: !!claim?.data,
+          error:   c?.error,
+        });
+        showToast(apiMessage, 'error');
+        // setSubmitting(false) happens in the outer `finally` block.
+        return;
+      }
 
       if (invoiceFile && claimId) {
         try {
