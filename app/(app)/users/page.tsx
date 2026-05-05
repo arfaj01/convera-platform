@@ -119,28 +119,61 @@ export default function UsersPage() {
   async function handleFormConfirm(data: CreateUserInput | UpdateUserInput) {
     const linkedContractIds: string[] = (data as any).linked_contract_ids || [];
 
-    if (modal.type === 'create') {
-      // Create user + linked contracts in a single API call (server-side, bypasses RLS)
-      const { email, full_name, full_name_ar, role, phone, organization, contract_roles } = data as CreateUserInput;
-      await adminCreateUser({
-        email, full_name, full_name_ar, role, phone, organization,
-        linked_contract_ids: linkedContractIds,
-        contract_roles: contract_roles || [],
-      });
-      showToast('تم إنشاء المستخدم بنجاح — سيصله بريد لتعيين كلمة المرور', 'ok');
-    } else if (modal.type === 'edit') {
-      const { full_name, full_name_ar, role, phone, organization, is_active, contract_roles } = data as UpdateUserInput;
-      // Pass linked_contract_ids + contract_roles to the API route so it syncs via admin client (bypasses RLS).
-      // An empty array explicitly means "remove all contracts/roles".
-      await adminUpdateUser(modal.user.id, {
-        full_name, full_name_ar, role, phone, organization, is_active,
-        linked_contract_ids: linkedContractIds,
-        contract_roles: contract_roles || [],
-      });
-      showToast('تم تحديث بيانات المستخدم بنجاح', 'ok');
+    // IAM-2 (2026-05-05) — wrap the entire flow in try/catch so any
+    // failure (Supabase Auth, profiles upsert, contract-role sync,
+    // network) surfaces as an Arabic toast instead of silently
+    // disappearing into an unhandled promise rejection. The modal
+    // is kept open on error so the user can correct and retry; the
+    // success path closes the modal and refreshes the list as before.
+    try {
+      if (modal.type === 'create') {
+        // Create user + linked contracts in a single API call (server-side, bypasses RLS)
+        const { email, full_name, full_name_ar, role, phone, organization, contract_roles } = data as CreateUserInput;
+        await adminCreateUser({
+          email, full_name, full_name_ar, role, phone, organization,
+          linked_contract_ids: linkedContractIds,
+          contract_roles: contract_roles || [],
+        });
+        showToast('تم إنشاء المستخدم بنجاح — سيصله بريد لتعيين كلمة المرور', 'ok');
+      } else if (modal.type === 'edit') {
+        const { full_name, full_name_ar, role, phone, organization, is_active, contract_roles } = data as UpdateUserInput;
+        // Pass linked_contract_ids + contract_roles to the API route so it syncs via admin client (bypasses RLS).
+        // An empty array explicitly means "remove all contracts/roles".
+        await adminUpdateUser(modal.user.id, {
+          full_name, full_name_ar, role, phone, organization, is_active,
+          linked_contract_ids: linkedContractIds,
+          contract_roles: contract_roles || [],
+        });
+        showToast('تم تحديث بيانات المستخدم بنجاح', 'ok');
+      }
+      setModal({ type: 'closed' });
+      await loadUsers();
+    } catch (err: unknown) {
+      // IAM-2 — surface the API's structured Arabic message in the toast.
+      // Field-name fallbacks accommodate every shape the admin routes use
+      // today plus the {code, messageAr, details} contract proposed by IAM-6.
+      const e = err as {
+        messageAr?: string;
+        message?: string;
+        error?: string | { messageAr?: string; message?: string };
+      } | null | undefined;
+      const message =
+        e?.messageAr
+        || (typeof e?.error === 'object' ? e.error?.messageAr : undefined)
+        || (typeof e?.error === 'string' ? e.error : undefined)
+        || (typeof e?.error === 'object' ? e.error?.message : undefined)
+        || e?.message
+        || 'فشل حفظ بيانات المستخدم';
+      // Re-throwing would propagate to the modal's <Button onClick> handler
+      // where React swallows it; surfacing the toast here is the contract.
+      showToast(message, 'error');
+      // Console-log a non-secret diagnostic snapshot for developer triage.
+      // The error object only carries the API response body — no headers,
+      // no env values — so this is safe even in production builds.
+      // eslint-disable-next-line no-console
+      console.warn('[users/page] handleFormConfirm failed:', err);
+      // Modal is intentionally NOT closed — the user can correct and retry.
     }
-    setModal({ type: 'closed' });
-    await loadUsers();
   }
 
   async function handleToggleActive() {
