@@ -8,8 +8,10 @@ import { createBrowserSupabase, getAuthHeaders } from '@/lib/supabase';
 import type {
   Claim,
   ClaimBOQItem,
+  ClaimKind,
   ClaimStaffItem,
   ClaimStatus,
+  ClaimType,
   ClaimView,
   ClaimWorkflow,
   Document,
@@ -37,21 +39,59 @@ export interface GetClaimFilters {
   offset?: number;
 }
 
+/**
+ * Phase 2.6 / Commit 3 (Migration 047 + 048).
+ *
+ * Inputs accepted by `createClaim`. The shape mirrors the JSON body
+ * accepted by `POST /api/claims/create`, which in turn calls the
+ * `create_claim_with_items_atomic` RPC.
+ *
+ * Removed (server-managed now — DO NOT pass these from the page):
+ *   • claimNo       — the RPC allocates it under pg_advisory_xact_lock
+ *   • submittedBy   — derived server-side from the bearer token
+ *   • status        — the RPC always inserts as 'draft'
+ *
+ * Renamed for canonical naming:
+ *   • periodFrom   → workPeriodFrom
+ *   • periodTo     → workPeriodTo
+ *   • referenceNo  → externalReference
+ *   • boqRows      → boqItems
+ *   • staffRows    → staffItems
+ *
+ * Added (Phase 2.6):
+ *   • claimKind    — 'running_payment' | 'final_payment' | 'advance_payment'
+ *
+ * Note: BOQ rows MUST NOT carry `prev_progress` / `previous_quantity`
+ * — the API route strips those silently and the RPC recomputes from
+ * the SUM of approved claims. Per Q5/Q7 the client never controls
+ * cumulative progress.
+ */
 export interface CreateClaimInput {
   contractId: string;
-  claimNo: number;
-  periodFrom: string | null;
-  periodTo: string | null;
-  referenceNo: string | null;
+  claimKind: ClaimKind;
+  claimType: ClaimType;
+  workPeriodFrom: string;       // YYYY-MM-DD (required by API)
+  workPeriodTo: string;         // YYYY-MM-DD (required by API)
+  externalReference?: string | null;
   boqAmount: number;
   staffAmount: number;
   retentionAmount: number;
   vatAmount: number;
-  claimType: 'boq_only' | 'staff_only' | 'mixed' | 'supervision';
-  submittedBy: string | null;
-  boqRows: Record<string, unknown>[];
-  staffRows: Record<string, unknown>[];
-  status?: 'draft' | 'submitted';
+  boqItems: Record<string, unknown>[];
+  staffItems: Record<string, unknown>[];
+}
+
+/**
+ * Shape returned by `POST /api/claims/create`. Mirrors the RPC return
+ * of `create_claim_with_items_atomic`.
+ */
+export interface CreatedClaim {
+  id: string;
+  claim_no: number;
+  claim_number: string;
+  claim_sequence: number;
+  claim_kind: ClaimKind;
+  status: 'draft';
 }
 
 export interface UpdateClaimInput {
@@ -208,55 +248,55 @@ export async function getClaimsList(filters?: GetClaimFilters): Promise<ApiRespo
 }
 
 /**
- * Create a claim in draft status
- * (Submit flow is handled separately via submitClaim)
+ * Create a claim in draft status.
+ *
+ * Phase 2.6 / Commit 3 (2026-05-04): this function NO LONGER inserts
+ * directly into `claims` from the browser. It delegates to
+ * `POST /api/claims/create`, which calls the
+ * `create_claim_with_items_atomic` RPC inside a single transaction
+ * with:
+ *   • open-claim guard          (only one open claim per contract)
+ *   • server-issued claim_number (`<ProjectCode><Kind><YYMMDD>-<NNN>`)
+ *   • server-truth prev_progress (SUM of approved claims, NOT client)
+ *   • per-contract advisory lock (no claim_sequence races)
+ *
+ * Submission to `under_supervisor_review` continues to flow through
+ * `submitClaim` / `/api/claims/submit` — the workflow engine is
+ * untouched by this commit.
  */
-export async function createClaim(input: CreateClaimInput): Promise<ApiResponse<Claim>> {
+export async function createClaim(
+  input: CreateClaimInput,
+): Promise<ApiResponse<CreatedClaim>> {
   try {
-    const supabase = createBrowserSupabase();
+    const headers = await getAuthHeaders();
+    const response = await fetch('/api/claims/create', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        contract_id:         input.contractId,
+        claim_kind:          input.claimKind,
+        claim_type:          input.claimType,
+        work_period_from:    input.workPeriodFrom,
+        work_period_to:      input.workPeriodTo,
+        external_reference:  input.externalReference ?? null,
+        boq_amount:          input.boqAmount,
+        staff_amount:        input.staffAmount,
+        retention_amount:    input.retentionAmount,
+        vat_amount:          input.vatAmount,
+        boq_items:           input.boqItems,
+        staff_items:         input.staffItems,
+      }),
+    });
 
-    // Step 1: Insert claim as draft
-    const { data: claim, error: claimErr } = await supabase
-      .from('claims')
-      .insert({
-        claim_no: input.claimNo,
-        contract_id: input.contractId,
-        status: 'draft',
-        period_from: input.periodFrom,
-        period_to: input.periodTo,
-        invoice_date: input.periodTo,
-        reference_no: input.referenceNo,
-        boq_amount: input.boqAmount,
-        staff_amount: input.staffAmount,
-        retention_amount: input.retentionAmount,
-        vat_amount: input.vatAmount,
-        claim_type: input.claimType,
-        submitted_by: input.submittedBy,
-        submitted_at: null,
-        created_by: input.submittedBy,
-      })
-      .select()
-      .single();
-
-    if (claimErr) throw claimErr;
-
-    // Step 2: Insert BOQ items
-    if (input.boqRows.length > 0) {
-      const { error: boqErr } = await supabase
-        .from('claim_boq_items')
-        .insert(input.boqRows.map((r) => ({ ...r, claim_id: claim.id })));
-      if (boqErr) console.warn('BOQ items insert warning:', boqErr.message);
+    const result = await response.json();
+    if (!response.ok) {
+      return createErrorResponse(result.error || 'فشل إنشاء المطالبة');
+    }
+    if (!result.data) {
+      return createErrorResponse('فشل إنشاء المطالبة — لم يُرجِع الخادم بيانات.');
     }
 
-    // Step 3: Insert staff items
-    if (input.staffRows.length > 0) {
-      const { error: staffErr } = await supabase
-        .from('claim_staff_items')
-        .insert(input.staffRows.map((r) => ({ ...r, claim_id: claim.id })));
-      if (staffErr) console.warn('Staff items insert warning:', staffErr.message);
-    }
-
-    return createResponse(claim);
+    return createResponse(result.data as CreatedClaim);
   } catch (error) {
     return createErrorResponse(friendlyError(error));
   }

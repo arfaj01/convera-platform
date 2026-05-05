@@ -145,6 +145,17 @@ export type ClaimStatus =
   | 'rejected'
   | 'cancelled';
 export type ClaimType = 'boq_only' | 'staff_only' | 'mixed' | 'supervision';
+
+/**
+ * Phase 2.6 / Commit 1 (Migration 047) — payment-cycle classifier.
+ * Distinct from ClaimType (structural classifier above). Nullable on
+ * legacy claim rows that pre-date Migration 047.
+ *
+ *   running_payment → مستخلص جاري   (claim_number kind code: R)
+ *   final_payment   → مستخلص ختامي  (F)
+ *   advance_payment → دفعة مقدمة    (A)
+ */
+export type ClaimKind = 'running_payment' | 'final_payment' | 'advance_payment';
 export type BoqProgressModel = 'count' | 'percentage' | 'monthly_lump_sum';
 
 // ─── Database Row Types ─────────────────────────────────────────
@@ -196,8 +207,22 @@ export interface Claim {
   reference_no: string | null;
   status: ClaimStatus;
   claim_type: ClaimType;
+  /** Phase 2.6 / Migration 047. Null on legacy rows. */
+  claim_kind?: ClaimKind | null;
+  /** Phase 2.6 / Migration 047. System-issued identifier
+   *  e.g. "CMH01R260504-001". Null on legacy rows. */
+  claim_number?: string | null;
+  /** Phase 2.6 / Migration 047. Per-contract running sequence. */
+  claim_sequence?: number | null;
   period_from: string | null;
   period_to: string | null;
+  /** Phase 2.6 / Migration 047. Canonical names; legacy
+   *  `period_from` / `period_to` columns are still maintained. */
+  work_period_from?: string | null;
+  work_period_to?: string | null;
+  /** Phase 2.6 / Migration 047. Optional free-text external
+   *  reference (replaces the spec role of reference_no). */
+  external_reference?: string | null;
   invoice_date: string | null;
   boq_amount: number;
   staff_amount: number;

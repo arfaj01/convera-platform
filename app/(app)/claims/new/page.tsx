@@ -241,21 +241,27 @@ export default function NewClaimPage() {
     try {
       const { boqRows, staffRows, claimType } = buildPayload();
 
+      // Phase 2.6 / Commit 3: createClaim delegates to /api/claims/create.
+      // The server allocates claim_no + claim_number under advisory lock,
+      // recomputes prev_progress from approved claims, and enforces the
+      // open-claim guard. The client is no longer the source of truth
+      // for any of those fields. Commit 5 will surface a proper UI
+      // dropdown for `claimKind` and explicit work-period inputs; until
+      // then we default to `running_payment` and reuse the existing
+      // periodFrom / periodTo state as the work-period range.
       const claim = await createClaim({
-        contractId: contract.id,
-        claimNo: nextClaimNo,
-        periodFrom: periodFrom || null,
-        periodTo: periodTo || null,
-        referenceNo: refNo || null,
-        boqAmount: boqTotal,
-        staffAmount: effectiveStaffTotal,
-        retentionAmount: 0,
-        vatAmount: summary.vatAmount,
+        contractId:         contract.id,
+        claimKind:          'running_payment',
         claimType,
-        submittedBy: profile.id,
-        boqRows,
-        staffRows,
-        status: 'draft',
+        workPeriodFrom:     periodFrom,
+        workPeriodTo:       periodTo,
+        externalReference:  refNo || null,
+        boqAmount:          boqTotal,
+        staffAmount:        effectiveStaffTotal,
+        retentionAmount:    0,
+        vatAmount:          summary.vatAmount,
+        boqItems:           boqRows,
+        staffItems:         staffRows,
       });
 
       const claimId = claim?.data?.id;
