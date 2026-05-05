@@ -24,6 +24,11 @@ import EmptyState from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchPendingClaims, performClaimAction } from '@/services/workflow';
+// IAM-4 (2026-05-05) — multi-role active-role helper. Used to compute
+// the contract role to forward to /api/claims/transition for users who
+// hold more than one role on the claim's contract. Same logic as the
+// claim detail page, extracted into lib/active-role.ts for reuse.
+import { pickActiveRole } from '@/lib/active-role';
 import { fmt, fmtDate } from '@/lib/formatters';
 import { CLAIM_STATUS_LABELS, ROLE_LABELS } from '@/lib/constants';
 import type { ClaimStatus, UserRole } from '@/lib/types';
@@ -133,11 +138,18 @@ function InlineActions({
   claim,
   actionContext,
   actorId,
+  availableRoles,
   onDone,
 }: {
   claim: PendingClaim;
   actionContext: ActionContext;
   actorId: string;
+  /**
+   * IAM-4 (2026-05-05) — the user's active ContractRoles on this
+   * claim's contract. Used to compute `actor_role` for /api/claims/transition.
+   * Empty for global directors (they bypass via isGlobalRole on the server).
+   */
+  availableRoles: ContractRole[];
   onDone: () => void;
 }) {
   const { showToast } = useToast();
@@ -169,6 +181,12 @@ function InlineActions({
     if (!action.workflowAction) return;
     setLoading(true);
     try {
+      // IAM-4 (2026-05-05) — pick the active role for this stage so
+      // multi-role users hit the same authorisation path as the claim
+      // detail page (added by 0f6ca80). The server validates the
+      // resulting role against user_contract_roles before honouring it.
+      const actorRole = pickActiveRole(availableRoles, claim.status);
+
       await performClaimAction(
         claim.id,
         action.workflowAction,
@@ -179,6 +197,8 @@ function InlineActions({
         // Phase 2.6: forward the picked return target (only meaningful
         // for return actions). Server-side validates against allow-list.
         pickedTarget || undefined,
+        // IAM-4: forward the user's active contract role.
+        actorRole,
       );
       showToast('تم تنفيذ الإجراء بنجاح ✓', 'ok');
       setModalAction(null);
@@ -266,7 +286,19 @@ function InlineActions({
             onExecute={async (targetStatus, notes) => {
               setLoading(true);
               try {
-                await performClaimAction(claim.id, 'director_override', actorId, claim.status, targetStatus, notes);
+                // IAM-4: forward the active contract role; pass undefined for
+                // pickedTarget since director_override carries its own target.
+                const actorRole = pickActiveRole(availableRoles, claim.status);
+                await performClaimAction(
+                  claim.id,
+                  'director_override',
+                  actorId,
+                  claim.status,
+                  targetStatus,
+                  notes,
+                  undefined,
+                  actorRole,
+                );
                 showToast('تم تعديل الإحالة بنجاح ✓', 'ok');
                 setModalAction(null);
                 setReason('');
@@ -443,11 +475,13 @@ function ClaimCard({
   claim,
   actionContext,
   actorId,
+  availableRoles,
   onRefresh,
 }: {
   claim: PendingClaim;
   actionContext: ActionContext;
   actorId: string;
+  availableRoles: ContractRole[];
   onRefresh: () => void;
 }) {
   const router = useRouter();
@@ -541,6 +575,7 @@ function ClaimCard({
           claim={claim}
           actionContext={actionContext}
           actorId={actorId}
+          availableRoles={availableRoles}
           onDone={onRefresh}
         />
       </CardBody>
@@ -840,6 +875,7 @@ export default function WorkflowPage() {
                         claim={claim}
                         actionContext={getActionContext(claim)}
                         actorId={profile.id}
+                        availableRoles={rolesByContract.get(claim.contract_id) ?? []}
                         onRefresh={load}
                       />
                     )

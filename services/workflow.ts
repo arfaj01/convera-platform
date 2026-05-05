@@ -132,6 +132,21 @@ export async function performClaimAction(
    * TransitionDef.toStatus.
    */
   pickedTarget?: ClaimStatus,
+  /**
+   * IAM-4 (2026-05-05) — multi-role active role.
+   *
+   * For users that hold more than one ContractRole on the claim's
+   * contract, the caller MAY supply the role they're acting with.
+   * It is forwarded to the transition API as `actor_role` and the
+   * server validates it against user_contract_roles before honouring
+   * it (the same pipeline introduced for the claim detail page in
+   * 0f6ca80). Single-role callers ignore this parameter; the API
+   * falls back to its legacy single-role resolution path.
+   *
+   * Use lib/active-role.ts::pickActiveRole(availableRoles, status)
+   * to compute the right value.
+   */
+  actorRole?: import('@/lib/types').ContractRole | null,
 ) {
   const headers = await getAuthHeaders();
 
@@ -183,6 +198,12 @@ export async function performClaimAction(
   }
   if (action === 'reject') {
     body.rejectionReason = notes || 'مرفوض';
+  }
+
+  // IAM-4 (2026-05-05) — forward the user's active contract role.
+  // Server validates against user_contract_roles before using it.
+  if (actorRole) {
+    body.actor_role = actorRole;
   }
 
   const response = await fetch('/api/claims/transition', {
