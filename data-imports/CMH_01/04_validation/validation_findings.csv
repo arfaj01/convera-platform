@@ -1,0 +1,4 @@
+severity,area,code,message,details
+P2,workflow_log,WF_LOG_SPARSE,"Only 1 populated movement-log row in SMART; the platform will generate workflow log entries when claims are imported and transitioned. Treat as informational, not a blocker.",
+P1,attachments,ATTACHMENT_LOW_MATCH_RATE,Only 67/145 expected attachments matched files in source folders (46.2%),Filename convention in SMART differs from actual filenames (CMH_01-CLM-001-INVOICE.pdf vs المستخلص 01.pdf). Attachment LINKING strategy needs to use claim_seq → numeric token match instead of literal filename match. See attachment_existence_report for details.
+P1,missing,MISSING_FIELDS,1 rows have missing required fields,"first 5: [{'dataset': 'claims', 'row_id': '17', 'missing_fields': 'work_period_from,work_period_to'}]"

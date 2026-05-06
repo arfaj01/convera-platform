@@ -1,0 +1,146 @@
+document_type,claim_seq,expected_filename,folder_hint,actual_match,exists
+financial_claim,1,CMH_01-CLM-001-INVOICE.pdf,04_PAYMENTS,المستخلص 01.pdf,True
+financial_claim,1,CMH_01-CLM-001-TECHREPORT.pdf,04_PAYMENTS,المستخلص 01.pdf,True
+financial_claim,2,CMH_01-CLM-002-INVOICE.pdf,04_PAYMENTS,المستخلص 02.pdf,True
+financial_claim,2,CMH_01-CLM-002-TECHREPORT.pdf,04_PAYMENTS,المستخلص 02.pdf,True
+financial_claim,3,CMH_01-CLM-003-INVOICE.pdf,04_PAYMENTS,المستخلص 03.pdf,True
+financial_claim,3,CMH_01-CLM-003-TECHREPORT.pdf,04_PAYMENTS,المستخلص 03.pdf,True
+financial_claim,4,CMH_01-CLM-004-INVOICE.pdf,04_PAYMENTS,المستخلص 04.pdf,True
+financial_claim,4,CMH_01-CLM-004-TECHREPORT.pdf,04_PAYMENTS,المستخلص 04.pdf,True
+financial_claim,5,CMH_01-CLM-005-INVOICE.pdf,04_PAYMENTS,المستخلص 05.pdf,True
+financial_claim,5,CMH_01-CLM-005-TECHREPORT.pdf,04_PAYMENTS,المستخلص 05.pdf,True
+financial_claim,6,CMH_01-CLM-006-INVOICE.pdf,04_PAYMENTS,المستخلص 06.pdf,True
+financial_claim,6,CMH_01-CLM-006-TECHREPORT.pdf,04_PAYMENTS,المستخلص 06.pdf,True
+financial_claim,7,CMH_01-CLM-007-INVOICE.pdf,04_PAYMENTS,المستخلص 07.pdf,True
+financial_claim,7,CMH_01-CLM-007-TECHREPORT.pdf,04_PAYMENTS,المستخلص 07.pdf,True
+financial_claim,8,CMH_01-CLM-008-INVOICE.pdf,04_PAYMENTS,المستخلص 08.pdf,True
+financial_claim,8,CMH_01-CLM-008-TECHREPORT.pdf,04_PAYMENTS,المستخلص 08.pdf,True
+financial_claim,9,CMH_01-CLM-009-INVOICE.pdf,04_PAYMENTS,المستخلص 09.pdf,True
+financial_claim,9,CMH_01-CLM-009-TECHREPORT.pdf,04_PAYMENTS,المستخلص 09.pdf,True
+financial_claim,10,CMH_01-CLM-010-INVOICE.pdf,04_PAYMENTS,المستخلص 10.pdf,True
+financial_claim,10,CMH_01-CLM-010-TECHREPORT.pdf,04_PAYMENTS,المستخلص 10.pdf,True
+financial_claim,11,CMH_01-CLM-011-INVOICE.pdf,04_PAYMENTS,المستخلص 11.pdf,True
+financial_claim,11,CMH_01-CLM-011-TECHREPORT.pdf,04_PAYMENTS,المستخلص 11.pdf,True
+financial_claim,12,CMH_01-CLM-012-INVOICE.pdf,04_PAYMENTS,المستخلص 12.pdf,True
+financial_claim,12,CMH_01-CLM-012-TECHREPORT.pdf,04_PAYMENTS,المستخلص 12.pdf,True
+financial_claim,13,CMH_01-CLM-013-INVOICE.pdf,04_PAYMENTS,المستخلص 13.pdf,True
+financial_claim,13,CMH_01-CLM-013-TECHREPORT.pdf,04_PAYMENTS,المستخلص 13.pdf,True
+financial_claim,14,CMH_01-CLM-014-INVOICE.pdf,04_PAYMENTS,المستخلص 14.pdf,True
+financial_claim,14,CMH_01-CLM-014-TECHREPORT.pdf,04_PAYMENTS,المستخلص 14.pdf,True
+financial_claim,15,CMH_01-CLM-015-INVOICE.pdf,04_PAYMENTS,المستخلص 15.pdf,True
+financial_claim,15,CMH_01-CLM-015-TECHREPORT.pdf,04_PAYMENTS,المستخلص 15.pdf,True
+financial_claim,16,CMH_01-CLM-016-INVOICE.pdf,04_PAYMENTS,المستخلص 16.pdf,True
+financial_claim,16,CMH_01-CLM-016-TECHREPORT.pdf,04_PAYMENTS,المستخلص 16.pdf,True
+financial_claim,17,CMH_01-CLM-017-INVOICE.pdf,04_PAYMENTS,المستخلص 17.pdf,True
+financial_claim,17,CMH_01-CLM-017-TECHREPORT.pdf,04_PAYMENTS,المستخلص 17.pdf,True
+financial_claim,18,CMH_01-CLM-018-INVOICE.pdf,04_PAYMENTS,المستخلص 18.pdf,True
+financial_claim,18,CMH_01-CLM-018-TECHREPORT.pdf,04_PAYMENTS,المستخلص 18.pdf,True
+financial_claim,19,CMH_01-CLM-019-INVOICE.pdf,04_PAYMENTS,المستخلص 19.pdf,True
+financial_claim,19,CMH_01-CLM-019-TECHREPORT.pdf,04_PAYMENTS,المستخلص 19.pdf,True
+financial_claim,20,CMH_01-CLM-020-INVOICE.pdf,04_PAYMENTS,المستخلص 20.pdf,True
+financial_claim,20,CMH_01-CLM-020-TECHREPORT.pdf,04_PAYMENTS,المستخلص 20.pdf,True
+financial_claim,21,CMH_01-CLM-021-INVOICE.pdf,04_PAYMENTS,المستخلص الختامي 21.pdf,True
+financial_claim,21,CMH_01-CLM-021-TECHREPORT.pdf,04_PAYMENTS,المستخلص الختامي 21.pdf,True
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+financial_claim,,#REF!,04_PAYMENTS,,False
+approval,1,CMH_01-CLM-001-APPROVAL.pdf,05_APPROVALS,,False
+approval,2,CMH_01-CLM-002-APPROVAL.pdf,05_APPROVALS,,False
+approval,3,CMH_01-CLM-003-APPROVAL.pdf,05_APPROVALS,المستخلص 03.pdf,True
+approval,4,CMH_01-CLM-004-APPROVAL.pdf,05_APPROVALS,,False
+approval,5,CMH_01-CLM-005-APPROVAL.pdf,05_APPROVALS,,False
+approval,6,CMH_01-CLM-006-APPROVAL.pdf,05_APPROVALS,,False
+approval,7,CMH_01-CLM-007-APPROVAL.pdf,05_APPROVALS,,False
+approval,8,CMH_01-CLM-008-APPROVAL.pdf,05_APPROVALS,,False
+approval,9,CMH_01-CLM-009-APPROVAL.pdf,05_APPROVALS,,False
+approval,10,CMH_01-CLM-010-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-10.pdf,True
+approval,11,CMH_01-CLM-011-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-11.pdf,True
+approval,12,CMH_01-CLM-012-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-12.pdf,True
+approval,13,CMH_01-CLM-013-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-13.pdf,True
+approval,14,CMH_01-CLM-014-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-14.pdf,True
+approval,15,CMH_01-CLM-015-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-15.pdf,True
+approval,16,CMH_01-CLM-016-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-16.pdf,True
+approval,17,CMH_01-CLM-017-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-17.pdf,True
+approval,18,CMH_01-CLM-018-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-18.pdf,True
+approval,19,CMH_01-CLM-019-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-19.pdf,True
+approval,20,CMH_01-CLM-020-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-20.pdf,True
+approval,21,CMH_01-CLM-021-APPROVAL.pdf,05_APPROVALS,شهادة اعتماد-21.pdf,True
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,#REF!,05_APPROVALS,,False
+approval,,CMH_01-VO-001-APPROVAL.pdf,03_VO,,False
+approval,,CMH_01-VO-001-APPROVAL.pdf,03_VO,,False
+approval,,CMH_01-VO-003-APPROVAL.pdf,03_VO,,False
+approval,,CMH_01-VO-004-APPROVAL.pdf,03_VO,,False
+approval,,CMH_01-VO-005-APPROVAL.pdf,03_VO,,False
+completion_certificate,1,CMH_01-CLM-001-CERTIFICATE.pdf,06_CERTIFICATES,,False
+completion_certificate,2,CMH_01-CLM-002-CERTIFICATE.pdf,06_CERTIFICATES,,False
+completion_certificate,3,CMH_01-CLM-003-CERTIFICATE.pdf,06_CERTIFICATES,,False
+completion_certificate,4,CMH_01-CLM-004-CERTIFICATE.pdf,06_CERTIFICATES,,False
+completion_certificate,5,CMH_01-CLM-005-CERTIFICATE.pdf,06_CERTIFICATES,,False
+completion_certificate,6,CMH_01-CLM-006-CERTIFICATE.pdf,06_CERTIFICATES,,False
+completion_certificate,7,CMH_01-CLM-007-CERTIFICATE.pdf,06_CERTIFICATES,,False
+completion_certificate,8,CMH_01-CLM-008-CERTIFICATE.pdf,06_CERTIFICATES,,False
+completion_certificate,9,CMH_01-CLM-009-CERTIFICATE.pdf,06_CERTIFICATES,,False
+completion_certificate,10,CMH_01-CLM-010-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-10.pdf,True
+completion_certificate,11,CMH_01-CLM-011-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-11.pdf,True
+completion_certificate,12,CMH_01-CLM-012-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-12.pdf,True
+completion_certificate,13,CMH_01-CLM-013-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-13.pdf,True
+completion_certificate,14,CMH_01-CLM-014-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-14.pdf,True
+completion_certificate,15,CMH_01-CLM-015-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-15.pdf,True
+completion_certificate,16,CMH_01-CLM-016-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-16.pdf,True
+completion_certificate,17,CMH_01-CLM-017-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-17.pdf,True
+completion_certificate,18,CMH_01-CLM-018-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-18.pdf,True
+completion_certificate,19,CMH_01-CLM-019-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-19.pdf,True
+completion_certificate,20,CMH_01-CLM-020-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-20.pdf,True
+completion_certificate,21,CMH_01-CLM-021-CERTIFICATE.pdf,06_CERTIFICATES,شهادة انجاز-21.pdf,True
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
+completion_certificate,,#REF!,06_CERTIFICATES,,False
