@@ -1,0 +1,87 @@
+{
+  "POST /api/contracts": {
+    "request_body": {
+      "contract_no": "CMH_01-C01",
+      "title_ar": "مشروع تأهيل مقر الوزارة بالعليا",
+      "type": "construction",
+      "party_name_ar": "شركة الخليج المتطورة للمقاولات",
+      "base_value": 57188871.8,
+      "vat_rate": 15.0,
+      "retention_pct": 10.0,
+      "start_date": "2022-11-08",
+      "end_date": "2024-02-01",
+      "duration_months": 14.0,
+      "status": "active"
+    },
+    "_notes": "Run only if `GET /api/contracts?contract_no=CMH_01-C01` returns empty."
+  },
+  "PATCH /api/admin/users/[id] (sync contract roles)": {
+    "request_body": {
+      "contract_roles": [
+        {
+          "contract_id": "<resolved>",
+          "contract_role": "final_approver"
+        }
+      ]
+    },
+    "_notes": "Per-user; iterate over user_contract_roles.csv. POST IAM-3 fix uses 3-tuple onConflict."
+  },
+  "POST /api/claims/create": {
+    "request_body": {
+      "contract_id": "<resolved from contracts table>",
+      "claim_kind": "running_payment",
+      "claim_type": "boq_only",
+      "work_period_from": "2022-11-08",
+      "work_period_to": "2023-01-08",
+      "external_reference": "230302028960",
+      "boq_amount": 643229.8300000001,
+      "staff_amount": 0,
+      "retention_amount": 64322.98300000001,
+      "vat_amount": 86836.02705000002,
+      "boq_items": [
+        {
+          "item_no": 1,
+          "unit_price": 18.0,
+          "contractual_qty": 17900.0,
+          "curr_progress": 6940.6,
+          "performance_pct": 100
+        },
+        {
+          "item_no": 2,
+          "unit_price": 14.5,
+          "contractual_qty": 10362.0,
+          "curr_progress": 2125.76,
+          "performance_pct": 100
+        },
+        {
+          "item_no": 3,
+          "unit_price": 8.5,
+          "contractual_qty": 18420.0,
+          "curr_progress": 3441.98,
+          "performance_pct": 100
+        }
+      ],
+      "staff_items": []
+    },
+    "_notes": "Per-claim. RPC create_claim_with_items_atomic enforces governance: open-claim guard, advisory lock, prev_progress recomputed server-side, claim_number generated as CMH01R<YYMMDD>-<NNN>."
+  },
+  "POST /api/claims/transition (drive to historical status)": {
+    "request_body": {
+      "claimId": "<from POST /create response>",
+      "action": "approve",
+      "actor_role": "supervisor",
+      "notes": "Historical migration — claim originally approved on <date>"
+    },
+    "_notes": "Repeat for each stage transition until the claim reaches its historical status (e.g. approved). Each call validates actor_role server-side against user_contract_roles."
+  },
+  "POST /api/documents (link attachment)": {
+    "request_body": {
+      "entity_type": "claim",
+      "entity_id": "<claim_id>",
+      "document_type": "invoice",
+      "file_path": "PROJECTS/CMH_01/04_PAYMENTS/المستخلص 01.pdf",
+      "storage_key": "<assigned by Storage upload>"
+    },
+    "_notes": "Use numeric-token matching to map `claim_seq` → actual filename in source folder (per attachment_existence_report.md)."
+  }
+}
