@@ -1,0 +1,4 @@
+# IAM-1 / F1 — keep xlsx + xlsm + xlsb candidates as binary (no LF/CRLF mangling).
+*.xlsx binary
+*.xlsm binary
+*.xlsb binary

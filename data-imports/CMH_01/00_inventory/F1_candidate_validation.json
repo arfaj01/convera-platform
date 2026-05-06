@@ -1,0 +1,134 @@
+[
+  {
+    "slug": "A_smart_master.xlsx",
+    "origin": "CMH_01_SMART.xlsx",
+    "size_bytes": 838014,
+    "zip_ok": false,
+    "zip_member_count": 0,
+    "openpyxl_ok": false,
+    "sheet_count": 0,
+    "sheet_names": [],
+    "sheet_dimensions": {},
+    "matched_fragments": [],
+    "tier": "D",
+    "notes": [
+      "zipfile: BadZipFile: File is not a zip file",
+      "invalid/corrupt — no ZIP EOCD signature"
+    ]
+  },
+  {
+    "slug": "B_boq_master.xlsx",
+    "origin": "02_BOQ/BOQ.xlsx",
+    "size_bytes": 99316,
+    "zip_ok": true,
+    "zip_member_count": 17,
+    "openpyxl_ok": true,
+    "sheet_count": 2,
+    "sheet_names": [
+      "BOQ",
+      "Sheet2"
+    ],
+    "sheet_dimensions": {
+      "BOQ": [
+        1419,
+        8
+      ],
+      "Sheet2": [
+        17,
+        4
+      ]
+    },
+    "matched_fragments": [],
+    "tier": "C",
+    "notes": []
+  },
+  {
+    "slug": "C_template_cal.xlsx",
+    "origin": "08_TEMPLATES/CAL.xlsx",
+    "size_bytes": 86498,
+    "zip_ok": true,
+    "zip_member_count": 15,
+    "openpyxl_ok": true,
+    "sheet_count": 1,
+    "sheet_names": [
+      "Sheet1"
+    ],
+    "sheet_dimensions": {
+      "Sheet1": [
+        53,
+        9
+      ]
+    },
+    "matched_fragments": [],
+    "tier": "C",
+    "notes": []
+  },
+  {
+    "slug": "D_template_rqs.xlsx",
+    "origin": "08_TEMPLATES/RQS.xlsx",
+    "size_bytes": 129078,
+    "zip_ok": true,
+    "zip_member_count": 17,
+    "openpyxl_ok": true,
+    "sheet_count": 1,
+    "sheet_names": [
+      "Sheet1"
+    ],
+    "sheet_dimensions": {
+      "Sheet1": [
+        51,
+        9
+      ]
+    },
+    "matched_fragments": [],
+    "tier": "C",
+    "notes": []
+  },
+  {
+    "slug": "E_template_drawing_approval.xlsx",
+    "origin": "08_TEMPLATES/طلب اعتماد مخططات.xlsx",
+    "size_bytes": 113755,
+    "zip_ok": true,
+    "zip_member_count": 22,
+    "openpyxl_ok": true,
+    "sheet_count": 2,
+    "sheet_names": [
+      "3RD FLOORING",
+      "3RD FLOORING (2)"
+    ],
+    "sheet_dimensions": {
+      "3RD FLOORING": [
+        59,
+        32
+      ],
+      "3RD FLOORING (2)": [
+        55,
+        32
+      ]
+    },
+    "matched_fragments": [],
+    "tier": "C",
+    "notes": []
+  },
+  {
+    "slug": "F_progress_percentages.xlsx",
+    "origin": "09_REPORTS_OUT/Weekly Reports/نسب الانجاز.xlsx",
+    "size_bytes": 19063,
+    "zip_ok": true,
+    "zip_member_count": 13,
+    "openpyxl_ok": true,
+    "sheet_count": 1,
+    "sheet_names": [
+      "Sheet1"
+    ],
+    "sheet_dimensions": {
+      "Sheet1": [
+        83,
+        20
+      ]
+    },
+    "matched_fragments": [],
+    "tier": "C",
+    "notes": []
+  }
+]
