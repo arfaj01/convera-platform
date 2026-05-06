@@ -1,0 +1,2 @@
+contract_no,claim_seq,occurred_at,actor_email,actor_role_ar,actor_contract_role,action_ar,from_status_ar,to_status_ar,from_status,to_status,reason_or_note,external_ref,source_sheet,source_row,source_file,extraction_method,confidence_level,data_quality_notes
+CMH_01-C01,1,2024-05-31 14:30,ma.alarfaj@momah.gov.sa,معتمد نهائي,final_approver,اعتماد,عند المعتمد,معتمدة,pending_director_approval,approved,مطالبة سليمة وفق المتطلبات,CMH_01-WF-001,سجل الحركة,3,CMH_01_SMART.xlsx,sheet سجل الحركة,high,

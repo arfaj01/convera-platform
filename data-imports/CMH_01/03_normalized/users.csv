@@ -1,0 +1,7 @@
+full_name_ar,full_name,email,phone,organization,role_source_ar,global_role,is_active,external_ref,source_sheet,source_row,source_file,extraction_method,confidence_level,data_quality_notes
+محمد العرفج,,ma.alarfaj@momah.gov.sa,555180602,إدارة التطوير والتأهيل,معتمد نهائي,director,True,CMH_01-USR-001,المستخدمون,2,CMH_01_SMART.xlsx,sheet المستخدمون,high,
+حسام الحبلين ,,halhablayn-contractor@momah.gov.sa,554319723,إدارة التطوير والتأهيل,مدير مشروع,reviewer,True,CMH_01-USR-002,المستخدمون,3,CMH_01_SMART.xlsx,sheet المستخدمون,high,
+عبدالله الدرع,,aaldera-contractor@momah.gov.sa,555617766,إدارة التطوير والتأهيل,جودة,reviewer,True,CMH_01-USR-003,المستخدمون,4,CMH_01_SMART.xlsx,sheet المستخدمون,high,
+أنس الغامدي,,anaalghamdi-contractor@momah.gov.sa,530506008,إدارة التطوير والتأهيل,تدقيق,auditor,True,CMH_01-USR-004,المستخدمون,5,CMH_01_SMART.xlsx,sheet المستخدمون,high,
+محمود مساد,,mahmoud.ragab@beeah.sa,508444507,شركة البيئة,مكتب استشاري,supervisor,True,CMH_01-USR-005,المستخدمون,6,CMH_01_SMART.xlsx,sheet المستخدمون,high,
+شركة الخليج المتطورة للمقاولات,,info@gdci.com.sa,583531923,شركة المقاولات,مقاول,contractor,True,CMH_01-USR-006,المستخدمون,7,CMH_01_SMART.xlsx,sheet المستخدمون,high,

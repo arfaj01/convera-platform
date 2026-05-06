@@ -1,0 +1,36 @@
+[
+  {
+    "party_role": "owner",
+    "party_role_ar": "الجهة المالكة",
+    "name_ar": "وزارة الشؤون البلدية والقروية والإسكان",
+    "name": "Ministry of Municipal, Rural Affairs and Housing",
+    "contract_no": "CMH_01-C01",
+    "source_sheet": "العقد",
+    "extraction_method": "derived from project name + organisational context",
+    "confidence_level": "high",
+    "data_quality_notes": ""
+  },
+  {
+    "party_role": "contractor",
+    "party_role_ar": "المقاول",
+    "name_ar": "شركة الخليج المتطورة للمقاولات",
+    "name": null,
+    "contract_no": "CMH_01-C01",
+    "source_sheet": "العقد",
+    "source_row": 2,
+    "extraction_method": "sheet العقد column \"المقاول\"",
+    "confidence_level": "high",
+    "data_quality_notes": "English name not in SMART; available in 01_CONTRACT/عقد المشروع.pdf if needed."
+  },
+  {
+    "party_role": "consultant",
+    "party_role_ar": "الاستشاري",
+    "name_ar": "شركة الشبانات للاستشارات المهنية",
+    "name": null,
+    "contract_no": "CMH_01-C01",
+    "source_sheet": "بنود العقد",
+    "extraction_method": "derived from BOQ.xlsx header row 2",
+    "confidence_level": "medium",
+    "data_quality_notes": "Cross-validated from BOQ.xlsx header line; not present as a structured field in SMART."
+  }
+]

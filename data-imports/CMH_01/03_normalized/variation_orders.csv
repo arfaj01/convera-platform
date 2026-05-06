@@ -1,0 +1,6 @@
+contract_no,order_no,justification_ar,submitted_at,addition_amount,reduction_amount,net_impact,status,status_source_ar,notes,external_ref,source_sheet,source_row,source_file,extraction_method,confidence_level,data_quality_notes
+CMH_01-C01,1,اضافة بنود + زيادة الكميات + تقليل كميات,,13535922.935999999,-10124600.018000001,3411322.9179999977,approved,معتمد,ضمن حد 10%,CMH_01-VO-001,أوامر التغيير,10,CMH_01_SMART.xlsx,sheet أوامر التغيير,high,
+CMH_01-C01,2,,,0.0,0.0,0.0,approved,معتمد,ضمن حد 10%,,أوامر التغيير,11,CMH_01_SMART.xlsx,sheet أوامر التغيير,high,
+CMH_01-C01,3,اضافة بنود ,,1042540.9,0.0,1042540.9,approved,معتمد,ضمن حد 10%,CMH_01-VO-003,أوامر التغيير,12,CMH_01_SMART.xlsx,sheet أوامر التغيير,high,
+CMH_01-C01,4,اضافة بنود ,,167715.9,0.0,167715.9,approved,معتمد,ضمن حد 10%,CMH_01-VO-004,أوامر التغيير,13,CMH_01_SMART.xlsx,sheet أوامر التغيير,high,
+CMH_01-C01,5,اضافة بنود + زيادة الكميات + تقليل كميات,,7277003.8637000015,-5835840.069200001,1441163.7945000008,approved,معتمد,ضمن حد 10%,CMH_01-VO-005,أوامر التغيير,14,CMH_01_SMART.xlsx,sheet أوامر التغيير,high,

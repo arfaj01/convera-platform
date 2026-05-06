@@ -1,0 +1,7 @@
+email,contract_no,contract_role,role_source_ar,is_active,assigned_by_email,notes,source_sheet,source_row,source_file,extraction_method,confidence_level,data_quality_notes
+ma.alarfaj@momah.gov.sa,CMH_01-C01,final_approver,معتمد نهائي,True,ma.alarfaj@momah.gov.sa,صلاحية الاعتماد النهائي,المستخدمون,2,CMH_01_SMART.xlsx,sheet المستخدمون → ROLE_MAP,high,
+halhablayn-contractor@momah.gov.sa,CMH_01-C01,project_manager,مدير مشروع,True,ma.alarfaj@momah.gov.sa,إدارة المشروع والمتابعة,المستخدمون,3,CMH_01_SMART.xlsx,sheet المستخدمون → ROLE_MAP,high,
+aaldera-contractor@momah.gov.sa,CMH_01-C01,quality,جودة,True,ma.alarfaj@momah.gov.sa,ضبط الجودة والمراجعة,المستخدمون,4,CMH_01_SMART.xlsx,sheet المستخدمون → ROLE_MAP,high,
+anaalghamdi-contractor@momah.gov.sa,CMH_01-C01,auditor,تدقيق,True,ma.alarfaj@momah.gov.sa,تدقيق المطالبات المالية,المستخدمون,5,CMH_01_SMART.xlsx,sheet المستخدمون → ROLE_MAP,high,
+mahmoud.ragab@beeah.sa,CMH_01-C01,supervisor,مكتب استشاري,True,ma.alarfaj@momah.gov.sa,الإشراف على تنفيذ المشروع,المستخدمون,6,CMH_01_SMART.xlsx,sheet المستخدمون → ROLE_MAP,high,
+info@gdci.com.sa,CMH_01-C01,contractor,مقاول,True,ma.alarfaj@momah.gov.sa,تقديم المطالبات وأوامر التغيير,المستخدمون,7,CMH_01_SMART.xlsx,sheet المستخدمون → ROLE_MAP,high,

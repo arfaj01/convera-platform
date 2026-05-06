@@ -1,0 +1,16 @@
+entity,source_sheet,source_workbook,normalized_file,record_count,cross_validation_source,confidence_overall,extraction_date
+project,العقد,CMH_01_SMART.xlsx,project.json,1,none,high,2026-05-06T11:02:28
+contract,العقد,CMH_01_SMART.xlsx,contract.json,1,none,high,2026-05-06T11:02:28
+parties,العقد + بنود العقد,CMH_01_SMART.xlsx,parties.json,3,none,high,2026-05-06T11:02:28
+users,المستخدمون,CMH_01_SMART.xlsx,users.csv,6,none,high,2026-05-06T11:02:28
+user_contract_roles,المستخدمون,CMH_01_SMART.xlsx,user_contract_roles.csv,6,none,high,2026-05-06T11:02:28
+boq_items,بنود العقد,CMH_01_SMART.xlsx,boq_items.csv,386,BOQ.xlsx Sheet2 (unit_price),high,2026-05-06T11:02:28
+claims,المطالبات,CMH_01_SMART.xlsx,claims.csv,21,none,high,2026-05-06T11:02:28
+claim_line_items,بنود المطالبات,CMH_01_SMART.xlsx,claim_line_items.csv,1562,none,high,2026-05-06T11:02:28
+variation_orders,أوامر التغيير,CMH_01_SMART.xlsx,variation_orders.csv,5,none,high,2026-05-06T11:02:28
+variation_order_items,بنود أوامر التغيير,CMH_01_SMART.xlsx,variation_order_items.csv,603,none,high,2026-05-06T11:02:28
+workflow_log,سجل الحركة,CMH_01_SMART.xlsx,workflow_log.csv,1,none,high,2026-05-06T11:02:28
+claim_documents,سجل المرفقات,CMH_01_SMART.xlsx,claim_documents.csv,0,PDFs in 04/05/06 folders,high,2026-05-06T11:02:28
+approvals,سجل المرفقات,CMH_01_SMART.xlsx,approvals.csv,0,PDFs in 04/05/06 folders,high,2026-05-06T11:02:28
+certificates,سجل المرفقات,CMH_01_SMART.xlsx,certificates.csv,0,PDFs in 04/05/06 folders,high,2026-05-06T11:02:28
+cumulative_item_progress,الملخص التراكمي,CMH_01_SMART.xlsx,cumulative_item_progress.csv,0,نسب الانجاز.xlsx (schedule progress),high,2026-05-06T11:02:28

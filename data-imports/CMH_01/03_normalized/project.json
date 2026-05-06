@@ -1,0 +1,11 @@
+{
+  "project_code": "CMH01",
+  "project_name_ar": "مشروع تأهيل مقر الوزارة بالعليا",
+  "contract_no_logical": "CMH_01-C01",
+  "source_workbook": "data-imports/CMH_01/00_inventory/source-snapshot/CMH_01_SMART.xlsx",
+  "source_sheet": "العقد",
+  "source_row": 2,
+  "extraction_method": "openpyxl direct read; data_only=True",
+  "confidence_level": "high",
+  "data_quality_notes": "Single canonical row in SMART; values cross-checked against contract PDFs in 01_CONTRACT/ during Phase 5."
+}
