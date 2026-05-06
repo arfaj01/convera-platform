@@ -7,8 +7,9 @@
 2. `git pull` (ensure HEAD includes the Phases 1-7 commits + IAM-1..IAM-4).
 3. `npm run verify:repo-path && npx tsc --noEmit && npm run build` — all green.
 4. `node scripts/iam-diagnostics-d1-d6.js` (or paste `SQL/diagnostics/iam_user_health.sql` into Supabase SQL Editor) — all checks pass.
-5. Confirm `.env.local` has SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + auth credentials for the operator user.
-6. Take backups (per pre_migration_checklist.md).
+5. Populate `.env.local` from `data-imports/CMH_01/08_migration/staging_env_template.txt` with values from a CONFIRMED STAGING Supabase project (never the production project ref `ngwxlockzkjpmzuvgakx`). See `data-imports/CMH_01/08_migration/STAGING_SETUP_REQUIRED.md` for the full rationale and operator instructions.
+6. **HARD GATE — `node scripts/check-cmh01-env.js` must exit 0.** No Phase 8 execution is permitted unless `check-cmh01-env.js` passes. The script is read-only, makes no DB or HTTP calls, prints only masked status, and refuses production-looking URLs.
+7. Take backups (per pre_migration_checklist.md).
 
 ## Run
 1. `node scripts/import-cmh01-controlled.js --dry-run` — verify Phase 7 dry-run is clean.
@@ -39,10 +40,4 @@ If any step fails, STOP and consult the rollback strategy.
 ## Post-flight
 1. Run `validation_summary.md` checks against the live DB.
 2. Compare claim totals: `SUM(total_amount) FROM claims WHERE contract_id=CMH_01` vs `SUM(claims.total_amount) FROM normalized claims.csv`. Δ < 0.01 SAR.
-3. UI smoke test: `/contracts/CMH_01-C01`, `/claims`, `/workflow`, `/dashboard/executive`.
-4. Generate the operational report.
-
-## What NOT to do
-- Do **not** invoke `_ETL/migrate.py` (legacy schema mapping).
-- Do **not** write directly to `claims` / `claim_boq_items` from any script — always go through `/api/claims/create` (atomic RPC).
-- Do **not** push the migration script's logs (they may contain claim_number values that are fine but better kept internal).
+3. UI 

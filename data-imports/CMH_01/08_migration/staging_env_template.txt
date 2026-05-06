@@ -1,0 +1,19 @@
+# CMH_01 — Phase 8 STAGING env template
+# -------------------------------------
+# Paste the contents below into `.env.local` at the repo root and replace each
+# <placeholder> with values from a CONFIRMED STAGING Supabase project.
+#
+# Hard rules:
+#   1. The Supabase URL must NOT be https://ngwxlockzkjpmzuvgakx.supabase.co
+#      (that is the platform's production project — see CLAUDE.md §15).
+#   2. Do not commit this file with real values; .env.local is gitignored.
+#   3. Never paste a service-role key into chat, tickets, or screenshots.
+#   4. After populating, run `node scripts/check-cmh01-env.js` before any
+#      Phase-8 step. The script must exit 0.
+
+NEXT_PUBLIC_SUPABASE_URL=https://<staging-project-ref>.supabase.co
+SUPABASE_URL=https://<staging-project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<staging-anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<staging-service-role-key>
+PLATFORM_BASE_URL=http://localhost:3000
+TEST_USER_PASSWORD=<bootstrap-password-if-needed>
