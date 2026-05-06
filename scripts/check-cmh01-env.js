@@ -77,6 +77,30 @@ const PROD_PROJECT_REF      = 'ngwxlockzkjpmzuvgakx';
 const SUPABASE_URL_REGEX    = /^https:\/\/([a-z0-9-]+)\.supabase\.co\/?$/i;
 const JWT_THREE_SEGMENT_RX  = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 
+// New-format Supabase keys (introduced 2025): privileged and publishable have
+// separate, self-identifying prefixes. The legacy formats were JWT-shaped for
+// both. This checker accepts either generation but enforces that the right
+// kind of key is in the right slot:
+//   • SUPABASE_SERVICE_ROLE_KEY       must be  sb_secret_*       or legacy-JWT
+//   • NEXT_PUBLIC_SUPABASE_ANON_KEY   must be  sb_publishable_*  or legacy-JWT
+const SB_SECRET_PREFIX_RX      = /^sb_secret_[A-Za-z0-9_-]{16,}$/;
+const SB_PUBLISHABLE_PREFIX_RX = /^sb_publishable_[A-Za-z0-9_-]{16,}$/;
+
+/**
+ * Classify a Supabase key. Returns one of:
+ *   'sb_secret'        — new privileged backend key
+ *   'sb_publishable'   — new publishable / anon key
+ *   'legacy_jwt'       — three-segment JWT (either role under the old format)
+ *   'unknown'          — does not match any recognised shape
+ */
+function classifyKey(v) {
+  if (typeof v !== 'string' || v.length === 0) return 'unknown';
+  if (SB_SECRET_PREFIX_RX.test(v))      return 'sb_secret';
+  if (SB_PUBLISHABLE_PREFIX_RX.test(v)) return 'sb_publishable';
+  if (JWT_THREE_SEGMENT_RX.test(v) && v.length >= 100) return 'legacy_jwt';
+  return 'unknown';
+}
+
 function isPlaceholder(v) {
   if (typeof v !== 'string') return true;
   for (const re of PLACEHOLDER_PATTERNS) {
@@ -143,17 +167,24 @@ if (!url) {
 }
 
 // 4.3 SUPABASE_SERVICE_ROLE_KEY
+//     Accept either the new sb_secret_* format or the legacy JWT format.
+//     REJECT a publishable key in this slot — that would be a privilege error.
 const srk = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_KEY || '';
 if (!srk) {
   bad('SUPABASE_SERVICE_ROLE_KEY', 'MISSING — required for Phase 8 (paste from staging Supabase project)');
 } else if (isPlaceholder(srk)) {
   bad('SUPABASE_SERVICE_ROLE_KEY', `PLACEHOLDER — value still contains template text (${maskTail(srk)})`);
-} else if (!JWT_THREE_SEGMENT_RX.test(srk)) {
-  bad('SUPABASE_SERVICE_ROLE_KEY', `INVALID — does not look like a JWT (${maskTail(srk)})`);
-} else if (srk.length < 100) {
-  bad('SUPABASE_SERVICE_ROLE_KEY', `INVALID — JWT too short (${maskTail(srk)})`);
 } else {
-  ok('SUPABASE_SERVICE_ROLE_KEY', `present (${maskTail(srk)})`);
+  const cls = classifyKey(srk);
+  if (cls === 'sb_publishable') {
+    bad('SUPABASE_SERVICE_ROLE_KEY', `WRONG-KIND — got an sb_publishable_* key in the SERVICE_ROLE slot. Paste the sb_secret_* key from the staging project. (${maskTail(srk)})`);
+  } else if (cls === 'unknown') {
+    bad('SUPABASE_SERVICE_ROLE_KEY', `INVALID — must be sb_secret_* or a legacy JWT (3 dot-separated base64url segments, ≥100 chars). Got: ${maskTail(srk)}`);
+  } else if (cls === 'sb_secret') {
+    ok('SUPABASE_SERVICE_ROLE_KEY', `present (sb_secret_*, ${maskTail(srk)})`);
+  } else {
+    ok('SUPABASE_SERVICE_ROLE_KEY', `present (legacy JWT, ${maskTail(srk)})`);
+  }
 }
 
 // 4.4 PLATFORM_BASE_URL
@@ -169,13 +200,24 @@ if (!baseUrl) {
 }
 
 // 4.5 NEXT_PUBLIC_SUPABASE_ANON_KEY (warn-only — not strictly required by the import script)
+//     Accept either the new sb_publishable_* format or the legacy JWT format.
+//     A privileged sb_secret_* key in this slot is a SECURITY issue — fail hard.
 const anon = env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 if (!anon) {
   warn('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'missing — not required by the import script, but the dev server will not boot without it');
 } else if (isPlaceholder(anon)) {
   warn('NEXT_PUBLIC_SUPABASE_ANON_KEY', `PLACEHOLDER (${maskTail(anon)}) — fix before starting the dev server`);
 } else {
-  ok('NEXT_PUBLIC_SUPABASE_ANON_KEY', `present (${maskTail(anon)})`);
+  const ac = classifyKey(anon);
+  if (ac === 'sb_secret') {
+    bad('NEXT_PUBLIC_SUPABASE_ANON_KEY', `SECURITY — got an sb_secret_* key in the public ANON slot. This must NEVER happen: NEXT_PUBLIC_* values ship to the browser. Replace with the sb_publishable_* anon key. (${maskTail(anon)})`);
+  } else if (ac === 'unknown') {
+    warn('NEXT_PUBLIC_SUPABASE_ANON_KEY', `unrecognised shape (${maskTail(anon)}) — expected sb_publishable_* or a legacy JWT`);
+  } else if (ac === 'sb_publishable') {
+    ok('NEXT_PUBLIC_SUPABASE_ANON_KEY', `present (sb_publishable_*, ${maskTail(anon)})`);
+  } else {
+    ok('NEXT_PUBLIC_SUPABASE_ANON_KEY', `present (legacy JWT, ${maskTail(anon)})`);
+  }
 }
 
 // 4.6 TEST_USER_PASSWORD (warn-only — only used by seed:auth-users)
