@@ -1,13 +1,68 @@
 # CMH_01 — F1 Recovery Report
 
-> **Date:** 2026-05-05
-> **Triggered by:** finding F1 in `file_inventory.md` — `CMH_01_SMART.xlsx` corrupted on disk.
-> **Action requested:** search for any recoverable structured workbook in the project tree and the official repo workspace; rank candidates; promote a Tier-A to `source-snapshot/CMH_01_SMART.xlsx` if found; otherwise produce this report and stop.
-> **Scope:** read-only on the source folder (no rename/move/delete/overwrite). All copies live under the official repo at `data-imports/CMH_01/00_inventory/source-snapshot/candidates/`.
+> **Status as of 2026-05-05 (UPDATED):** ✅ **F1 RESOLVED.** Operator repaired the SMART workbook on the host and placed the recovered file at `source-snapshot/candidates/A_smart_master.xlsx`. The repaired file passes every check (ZIP intact, openpyxl loads cleanly, 14 sheets including all 8 priority sheets with populated data). It has been **promoted to the canonical location** at `source-snapshot/CMH_01_SMART.xlsx` and is now the primary structured data source for Phases 2 → 7.
+
+> **Path A taken (canonical / high-fidelity).** Path B (degraded hybrid) is no longer needed and is dropped from the plan.
 
 ---
 
-## 1. Outcome at a glance
+## 0. F1 resolution snapshot (added 2026-05-05)
+
+### What changed
+
+| Field | Before (corrupt snapshot) | After (operator repair) |
+|---|---|---|
+| ZIP integrity | FAIL — `End-of-central-directory signature not found` | OK — 35 internal members |
+| `openpyxl.load_workbook` | FAIL — `BadZipFile: File is not a zip file` | OK |
+| Sheet count | 0 | 14 |
+| Tier | D (corrupt) | **A (canonical)** |
+
+### Sheets confirmed in the repaired workbook
+
+| Sheet | Rows × Cols | Role in migration |
+|---|---:|---|
+| `العقد` | 3 × 14 | Contract master (1 data row at r2 — `CMH_01-C01`) |
+| `بنود العقد` | 391 × 11 | BOQ contract items (item_no, description, unit, contractual_qty, unit_price, …) |
+| `المطالبات` | 38 × 17 | Claims headers (filter on `كود العقد == 'CMH_01-C01'` to drop test rows for other contracts) |
+| `بنود المطالبات` | 1 805 × 13 | Per-claim per-BOQ-item progress (`كمية هذه الفترة`, التراكمي, نسبة الإنجاز) — the missing dimension that made Path B unacceptable |
+| `الملخص التراكمي` | 388 × 9 | Per-item cumulative summary across all approved claims |
+| `أوامر التغيير` | 24 × 12 | Variation orders (with the 10% governance panel header) |
+| `بنود أوامر التغيير` | 726 × 13 | Per-VO line items |
+| `المستخدمون` | 27 × 7 | Stakeholders / users on the project |
+| `الجاهزية` | 30 × 9 | Readiness panel |
+| `سجل الحركة` | 203 × 10 | Movement log — workflow transitions |
+| `سجل المرفقات` | 233 × 14 | Attachments log |
+| `مراجع` | 14 × 6 | References |
+| `ابدأ هنا`, `Sheet1` | tiny | Onboarding / placeholder |
+
+### Promotion
+
+```
+data-imports/CMH_01/00_inventory/source-snapshot/
+├── candidates/
+│   └── A_smart_master.xlsx        ← 838 014 bytes — repaired
+└── CMH_01_SMART.xlsx              ← canonical primary (copy of A_smart_master.xlsx)
+```
+
+The candidates folder is preserved as forensic evidence and as the source-of-truth for the multi-source comparison Phase 4 will perform (BOQ vs SMART, schedule % vs SMART claim progress).
+
+### Extraction priority (now binding)
+
+Per the operator directive 2026-05-05:
+
+1. **Primary / canonical:** `CMH_01_SMART.xlsx`. Every contract / BOQ / claim / VO / certificate / movement-log row originates here.
+2. **Cross-validation only:** `02_BOQ/BOQ.xlsx` for BOQ unit prices and item descriptions where the SMART workbook is empty.
+3. **Cross-validation only:** `نسب الانجاز.xlsx` for week-by-week schedule progress.
+4. **Evidence / attachments only:** the 22+22+22 PDFs under `04_PAYMENTS/`, `05_APPROVALS/`, `06_CERTIFICATES/`. They are linked as documents to the corresponding claim records, not parsed as primary data unless a SMART field is missing.
+5. **Forbidden:** `_ETL/migrate.py` (legacy schema mapping; pre-Migration-046).
+
+---
+
+## 1. Original outcome (preserved for history — superseded by §0)
+
+**No Tier-A candidate was found.** The canonical multi-sheet SMART workbook is not recoverable from the source tree or the official repo. **F1 is still BLOCKED for the full canonical dataset (claims, VOs, certificates, movement log).**
+
+## 1. Original outcome (preserved for history — superseded by §0)
 
 **No Tier-A candidate was found.** The canonical multi-sheet SMART workbook is not recoverable from the source tree or the official repo. **F1 is still BLOCKED for the full canonical dataset (claims, VOs, certificates, movement log).**
 

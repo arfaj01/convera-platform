@@ -3,18 +3,105 @@
     "slug": "A_smart_master.xlsx",
     "origin": "CMH_01_SMART.xlsx",
     "size_bytes": 838014,
-    "zip_ok": false,
-    "zip_member_count": 0,
-    "openpyxl_ok": false,
-    "sheet_count": 0,
-    "sheet_names": [],
-    "sheet_dimensions": {},
-    "matched_fragments": [],
-    "tier": "D",
+    "zip_ok": true,
+    "zip_member_count": 35,
+    "openpyxl_ok": true,
+    "sheet_count": 14,
+    "sheet_names": [
+      "ابدأ هنا",
+      "العقد",
+      "بنود العقد",
+      "المطالبات",
+      "بنود المطالبات",
+      "الملخص التراكمي",
+      "أوامر التغيير",
+      "بنود أوامر التغيير",
+      "المستخدمون",
+      "الجاهزية",
+      "سجل الحركة",
+      "Sheet1",
+      "مراجع",
+      "سجل المرفقات"
+    ],
+    "sheet_dimensions": {
+      "ابدأ هنا": [
+        72,
+        6
+      ],
+      "العقد": [
+        3,
+        14
+      ],
+      "بنود العقد": [
+        391,
+        11
+      ],
+      "المطالبات": [
+        38,
+        17
+      ],
+      "بنود المطالبات": [
+        1805,
+        13
+      ],
+      "الملخص التراكمي": [
+        388,
+        9
+      ],
+      "أوامر التغيير": [
+        24,
+        12
+      ],
+      "بنود أوامر التغيير": [
+        726,
+        13
+      ],
+      "المستخدمون": [
+        27,
+        7
+      ],
+      "الجاهزية": [
+        30,
+        9
+      ],
+      "سجل الحركة": [
+        203,
+        10
+      ],
+      "Sheet1": [
+        1,
+        1
+      ],
+      "مراجع": [
+        14,
+        6
+      ],
+      "سجل المرفقات": [
+        233,
+        14
+      ]
+    },
+    "matched_fragments": [
+      "العقد",
+      "بنود العقد",
+      "المطالبات",
+      "بنود المطالبات",
+      "أوامر التغيير",
+      "بنود أوامر التغيير",
+      "المستخدمون",
+      "الجاهزية",
+      "سجل الحركة",
+      "سجل المرفقات",
+      "الملخص التراكمي",
+      "مراجع"
+    ],
+    "tier": "A",
     "notes": [
-      "zipfile: BadZipFile: File is not a zip file",
-      "invalid/corrupt — no ZIP EOCD signature"
-    ]
+      "REPAIRED 2026-05-05 by operator. Workbook now opens cleanly.",
+      "Promoted to source-snapshot/CMH_01_SMART.xlsx as the canonical structured data source.",
+      "All 8 priority sheets are present with populated data rows."
+    ],
+    "updated_at": "2026-05-06T10:49:23"
   },
   {
     "slug": "B_boq_master.xlsx",
