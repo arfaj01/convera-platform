@@ -1,0 +1,21 @@
+{
+  "error_count": 2,
+  "critical_errors": [
+    {
+      "severity": "P1",
+      "step": "create",
+      "claim_seq": 15,
+      "message": "No claim_line_items for this claim_seq. Skip claim or accept zero-line claim."
+    }
+  ],
+  "payload_validation_issues": [
+    {
+      "endpoint": "/api/claims/create",
+      "issues": [
+        "claim has no positive curr_progress lines",
+        "work_period_* missing"
+      ],
+      "note": "claim_seq=15; expected claim_number prefix CMH01R<YYMMDD>-<NNN>."
+    }
+  ]
+}

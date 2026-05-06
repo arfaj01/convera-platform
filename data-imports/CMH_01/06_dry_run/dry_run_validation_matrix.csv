@@ -1,0 +1,11 @@
+step,kind,count,payload_status
+1,contract,1,ready
+2,user_contract_roles,6,ready
+3,boq_template,386,ready (batch)
+4,change_orders,5,ready
+5,change_order_items,603,ready (batch per VO)
+6,claims_create,21,ready
+7,claim_transitions,105,ready (variable per-claim)
+8,claim_documents,70,ready
+8,approvals,40,ready
+8,certificates,35,ready
