@@ -1,36 +1,24 @@
 -- ════════════════════════════════════════════════════════════════════
---  CMH_01 — STAGING Schema Bundle  v2 (Path B refined)
+--  CMH_01 — STAGING Schema Bundle  v2.1 (constraint-syntax fix)
 --  Authored: 2026-05-07
 --
 --  Target:    STAGING ONLY  —  project ref  jrqkzwacerdudmeacvar
 --  FORBIDDEN: production project ref  ngwxlockzkjpmzuvgakx
 --
---  v2 changes vs v1 (commit 0402bad → cbfd660):
---    • 010_production_schema.sql is now the FOUNDATION (applied first).
---    • Sections 001, 003, 004, 009 SKIPPED (redundant with 010 v2.0 snapshot).
---    • Additive sections 002, 006, 007, 008 reordered to apply AFTER 010.
---    • Synthetic patch added: change_order_staff_items (the only piece of
---      legacy 003 that 010 does not create; referenced by section 026 RLS).
---    • All other sections (010_user_contracts onwards) unchanged.
---
---  Composition:
---    • 1 foundation (010_production_schema)
---    • 1 synthetic patch (change_order_staff_items)
---    • 4 additive pre-010 sections (002, 006, 007, 008)
---    • 25 legacy sections from 010_user_contracts → 035, 042, 043, 045
---    • 8 current sections (040, 041, 044, 046–050)
---    • 5 seeds (001–004 legacy + 005 current)
---    • 6 SKIPPED comment-only blocks (001, 003, 004, 009, 015, 018)
+--  v2.1 changes vs v2 (commit 17c0ec1):
+--    • Source fix to 010_production_schema.sql — replaced 2 invalid
+--      `CONSTRAINT name AS (expr)` clauses with valid `CONSTRAINT name
+--      CHECK (expr)` (PG error 42601 at line 144 and 559 of source).
+--    • No structural change — same skip list, same apply order, same
+--      synthetic patch.
 --
 --  Operator instructions:
---    1. Confirm the SQL Editor is on staging (URL contains
---       'jrqkzwacerdudmeacvar', NOT 'ngwxlockzkjpmzuvgakx').
---    2. Run the pre-flight guard (lines 36–46) first — alone.
---    3. Apply each subsequent section in order.
---    4. After all sections succeed, run staging_schema_verification.sql.
+--    1. Confirm staging tab (URL contains 'jrqkzwacerdudmeacvar').
+--    2. Run pre-flight guard (lines 36–46) alone first.
+--    3. Apply each subsequent STEP in order; stop on first error.
+--    4. After all STEPs succeed, run staging_schema_verification.sql.
 -- ════════════════════════════════════════════════════════════════════
 
--- Pre-flight: refuse to run if pg_settings advertises the production project ref.
 DO $$
 DECLARE prod_marker TEXT := 'ngwxlockzkjpmzuvgakx';
 BEGIN
@@ -44,46 +32,40 @@ BEGIN
 END $$;
 
 
--- ─── SKIPPED — 001 (legacy) — 001_base_schema.sql ───────────────
+-- ─── SKIPPED — 001 (legacy) — 001_base_schema.sql ───
 -- Reason: REDUNDANT — superseded by 010_production_schema v2.0 snapshot
--- This section is NOT applied to staging.
--- (skipped — no content emitted)
+-- (skipped)
 
 
--- ─── SKIPPED — 003 (legacy) — 003_change_orders_and_hardening.sql ───────────────
+-- ─── SKIPPED — 003 (legacy) — 003_change_orders_and_hardening.sql ───
 -- Reason: REDUNDANT with 010 (010 already creates change_orders + change_order_boq_items + change_order_workflow). The only missing piece — change_order_staff_items — is added as synthetic patch below
--- This section is NOT applied to staging.
--- (skipped — no content emitted)
+-- (skipped)
 
 
--- ─── SKIPPED — 004 (legacy) — 004_contract_templates_and_progress_models.sql ───────────────
+-- ─── SKIPPED — 004 (legacy) — 004_contract_templates_and_progress_models.sql ───
 -- Reason: REDUNDANT — 010 already creates contract_boq_templates + contract_staff_templates
--- This section is NOT applied to staging.
--- (skipped — no content emitted)
+-- (skipped)
 
 
--- ─── SKIPPED — 009 (legacy) — 009_rename_claim_statuses.sql ───────────────
+-- ─── SKIPPED — 009 (legacy) — 009_rename_claim_statuses.sql ───
 -- Reason: REDUNDANT — 010 v2.0 enum already uses the renamed claim statuses
--- This section is NOT applied to staging.
--- (skipped — no content emitted)
+-- (skipped)
 
 
--- ─── SKIPPED — 015 (legacy) — 015_fix_contract_231001101771_templates.sql ───────────────
+-- ─── SKIPPED — 015 (legacy) — 015_fix_contract_231001101771_templates.sql ───
 -- Reason: PRODUCTION-ONLY data fix
--- This section is NOT applied to staging.
--- (skipped — no content emitted)
+-- (skipped)
 
 
--- ─── SKIPPED — 018 (legacy) — 018_revert_staff_grade3_rows.sql ───────────────
+-- ─── SKIPPED — 018 (legacy) — 018_revert_staff_grade3_rows.sql ───
 -- Reason: PRODUCTION-ONLY data revert
--- This section is NOT applied to staging.
--- (skipped — no content emitted)
+-- (skipped)
 
 
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 1  —  MIGRATION  —  seq=foundation
 --  Source: legacy: migrations/010_production_schema.sql
---  Reason: foundational v2.0 snapshot — REORDERED to apply first
+--  Reason: foundational v2.0 snapshot — REORDERED to apply first  [PATCHED 2026-05-07: CONSTRAINT … AS → CHECK]
 -- ════════════════════════════════════════════════════════════════════
 -- ============================================================================
 -- CONVERA — Production PostgreSQL Schema
@@ -228,7 +210,7 @@ CREATE TABLE profiles (
   updated_at TIMESTAMPTZ DEFAULT NOW(),
 
   -- Constraints
-  CONSTRAINT email_normalized AS (email = LOWER(TRIM(email))),
+  CONSTRAINT email_normalized CHECK (email = LOWER(TRIM(email))),
   CONSTRAINT phone_format CHECK (phone ~ '^\+?[0-9\-\s]+$' OR phone IS NULL)
 );
 
@@ -643,7 +625,7 @@ CREATE TABLE audit_logs (
 
   -- This table is INSERT-ONLY
   -- No UPDATE or DELETE allowed (enforced by trigger)
-  CONSTRAINT audit_logs_insert_only AS (true)
+  CONSTRAINT audit_logs_insert_only CHECK (true)
 );
 
 CREATE INDEX idx_audit_logs_table_record ON audit_logs(table_name, record_id);
@@ -1333,19 +1315,14 @@ COMMENT ON FUNCTION fn_check_change_order_limit() IS 'Validates that change orde
 
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 2  —  PATCH  —  seq=synthetic
---  Source: synthetic / patch
---  Reason: synthetic patch: adds change_order_staff_items (the only piece 010 lacks from section 3) + its RLS policies
+--  Source: synthetic
+--  Reason: synthetic patch: change_order_staff_items + RLS (extracted from 003)
 -- ════════════════════════════════════════════════════════════════════
 -- ─── SYNTHETIC PATCH ───────────────────────────────────────────────
 -- change_order_staff_items table — the only object in legacy 003 that
 -- 010_production_schema.sql does NOT create. Section 26 (RLS for
 -- contract-scoped roles) references this table, so we add it here as
 -- an additive patch on top of the 010 foundation.
---
--- Source: legacy CONVERA/SQL/migrations/003_change_orders_and_hardening.sql
--- All other content of 003 is redundant with 010 and is intentionally NOT
--- replayed (would conflict with 010\u2019s definitions of change_orders /
--- change_order_boq_items / change_order_workflow + change_order_status enum).
 -- ───────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS change_order_staff_items (
@@ -1362,9 +1339,6 @@ CREATE TABLE IF NOT EXISTS change_order_staff_items (
   CONSTRAINT co_staff_items_co_item_unique UNIQUE (change_order_id, item_no)
 );
 
-COMMENT ON TABLE change_order_staff_items IS
-  'Staff positions added by a Change Order. contract_months stored per row.';
-
 CREATE INDEX IF NOT EXISTS idx_co_staff_items_co
   ON change_order_staff_items(change_order_id);
 
@@ -1377,43 +1351,37 @@ DROP POLICY IF EXISTS "co_staff_external_update"  ON change_order_staff_items;
 DROP POLICY IF EXISTS "co_staff_external_delete"  ON change_order_staff_items;
 
 CREATE POLICY "co_staff_internal_all"
-  ON change_order_staff_items FOR ALL
-  USING (is_internal());
+  ON change_order_staff_items FOR ALL USING (is_internal());
 
 CREATE POLICY "co_staff_external_select"
   ON change_order_staff_items FOR SELECT
   USING (change_order_id IN (
-    SELECT co.id FROM change_orders co
-    JOIN contracts ct ON co.contract_id = ct.id
+    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
     WHERE ct.external_user_id = auth.uid()
   ));
 
 CREATE POLICY "co_staff_external_insert"
   ON change_order_staff_items FOR INSERT
   WITH CHECK (change_order_id IN (
-    SELECT co.id FROM change_orders co
-    JOIN contracts ct ON co.contract_id = ct.id
+    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
     WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
   ));
 
 CREATE POLICY "co_staff_external_update"
   ON change_order_staff_items FOR UPDATE
   USING (change_order_id IN (
-    SELECT co.id FROM change_orders co
-    JOIN contracts ct ON co.contract_id = ct.id
+    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
     WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
   ))
   WITH CHECK (change_order_id IN (
-    SELECT co.id FROM change_orders co
-    JOIN contracts ct ON co.contract_id = ct.id
+    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
     WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
   ));
 
 CREATE POLICY "co_staff_external_delete"
   ON change_order_staff_items FOR DELETE
   USING (change_order_id IN (
-    SELECT co.id FROM change_orders co
-    JOIN contracts ct ON co.contract_id = ct.id
+    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
     WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
   ));
 
