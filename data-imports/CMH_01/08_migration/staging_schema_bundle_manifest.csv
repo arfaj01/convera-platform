@@ -1,53 +1,52 @@
 step,sequence,source_tree,source_file,kind,status,reason
-,001,legacy,migrations/001_base_schema.sql,SKIPPED,not-applied,REDUNDANT — superseded by 010_production_schema v2.0 snapshot
-,003,legacy,migrations/003_change_orders_and_hardening.sql,SKIPPED,not-applied,REDUNDANT with 010 (only piece 010 misses — change_order_staff_items — added as synthetic patch below)
-,004,legacy,migrations/004_contract_templates_and_progress_models.sql,SKIPPED,not-applied,REDUNDANT — 010 already creates contract_boq_templates + contract_staff_templates
-,009,legacy,migrations/009_rename_claim_statuses.sql,SKIPPED,not-applied,REDUNDANT — 010 v2.0 enum already uses the renamed claim statuses
-,015,legacy,migrations/015_fix_contract_231001101771_templates.sql,SKIPPED,not-applied,PRODUCTION-ONLY data fix
+,010a,legacy,migrations/010_production_schema.sql,SKIPPED,not-applied,"PARALLEL UNIVERSE — v2.0 standalone snapshot that uses director_id + contract_assignments instead of contracts.external_user_id. Sections 003, 004, 010_user_contracts, 019, 023, 024, 025, 026 (and seed 002) all reference contracts.external_user_id which 010_production_schema does NOT create. Skipping 010 keeps the migration chain self-consistent on the 001 foundation."
+,015,legacy,migrations/015_fix_contract_231001101771_templates.sql,SKIPPED,not-applied,PRODUCTION-ONLY data fix for a real-life contract
 ,018,legacy,migrations/018_revert_staff_grade3_rows.sql,SKIPPED,not-applied,PRODUCTION-ONLY data revert
-1,foundation,legacy,migrations/010_production_schema.sql,MIGRATION,included,foundational v2.0 snapshot — REORDERED to apply first  [PATCHED 2026-05-07: CONSTRAINT…AS→CHECK + GENERATED…SELECT→denormalized progress_model]
-2,synthetic,patch,change_order_staff_items_patch,PATCH,included,synthetic patch: change_order_staff_items + RLS (extracted from 003)
-3,002,legacy,migrations/002_step0_fixes.sql,MIGRATION,included,step 0 fixes + storage buckets
-4,006,legacy,migrations/006_convera_users_otp.sql,MIGRATION,included,CONVERA_USERS + convera_otp tables
-5,007,legacy,migrations/007_contract_amendments_enhancement.sql,MIGRATION,included,contract amendments enhancement
-6,008,legacy,migrations/008_invoice_attachment_governance.sql,MIGRATION,included,invoice attachment governance
-7,010b,legacy,migrations/010_user_contracts.sql,MIGRATION,included,user_contracts (m2m)
-8,011,legacy,migrations/011_fix_rls_returned_statuses.sql,MIGRATION,included,RLS fix returned statuses
-9,012,legacy,migrations/012_fix_rls_workflow_roles.sql,MIGRATION,included,RLS fix workflow roles
-10,013,legacy,migrations/013_fix_trigger_security_definer.sql,MIGRATION,included,trigger SECURITY DEFINER fix
-11,014,legacy,migrations/014_db_level_transition_guard.sql,MIGRATION,included,DB-level transition guard
-12,016,legacy,migrations/016_update_contract_types.sql,MIGRATION,included,contract_type enum updates
-13,017,legacy,migrations/017_fix_contracts_rls_user_contracts.sql,MIGRATION,included,RLS fix contracts/user_contracts join
-14,019,legacy,migrations/019_definitive_rls_scope_fix.sql,MIGRATION,included,definitive RLS scoping
-15,020,legacy,migrations/020_fix_internal_role_policies.sql,MIGRATION,included,internal-role policy fixes
-16,021,legacy,migrations/021_sync_auth_bans_and_verify.sql,MIGRATION,included,auth bans sync
-17,022,legacy,migrations/022_fix_profiles_recursion.sql,MIGRATION,included,profiles RLS recursion fix
-18,023,legacy,migrations/023_fix_contract_scoping_leaks.sql,MIGRATION,included,plug contract-scoping leaks
-19,024,legacy,migrations/024_drop_contracts_auth_read_backdoor.sql,MIGRATION,included,remove auth-read backdoor on contracts
-20,025,legacy,migrations/025_contract_scoped_roles.sql,MIGRATION,included,introduce user_contract_roles
-21,026,legacy,migrations/026_rls_contract_scoped_roles.sql,MIGRATION,included,RLS for contract-scoped roles
-22,027,legacy,migrations/027_contract_role_browser_helpers.sql,MIGRATION,included,browser helpers for contract roles
-23,028,legacy,migrations/028_add_last_transition_at.sql,MIGRATION,included,last_transition_at column
-24,029,legacy,migrations/029_contractor_withdraw_action.sql,MIGRATION,included,contractor withdraw action
-25,030,legacy,migrations/030_completion_certificate_and_cancel.sql,MIGRATION,included,completion-cert + cancel actions
-26,031,legacy,migrations/031_atomic_claim_submission.sql,MIGRATION,included,predecessor atomic-submission RPC
-27,031b,legacy,migrations/031b_fix_audit_logs_columns.sql,MIGRATION,included,audit_logs column fix
-28,033,legacy,migrations/033_fix_document_type_enum.sql,MIGRATION,included,document_type enum fix
-29,034,legacy,migrations/034_audit_helper_function.sql,MIGRATION,included,audit helper function
-30,035,legacy,migrations/035_block_submitted_persist.sql,MIGRATION,included,block submitted persistence
-31,040,current,migrations/040_flexible_approvers_and_import.sql,MIGRATION,included,flexible approvers (newer)
-32,041,current,migrations/041_final_approver_role.sql,MIGRATION,included,final_approver role (newer)
-33,042,legacy,migrations/042_extend_enums_for_template_v7.sql,MIGRATION,included,enum extension (full version)
-34,043,legacy,migrations/043_data_model_hardening_SAFE.sql,MIGRATION,included,D2 hardening SAFE variant
-35,044,current,migrations/044_imports_governance.sql,MIGRATION,included,imports governance (newer)
-36,045,legacy,migrations/045_contract_role_multi_assignment.sql,MIGRATION,included,3-tuple unique invariant
-37,046,current,migrations/046_quality_and_pm_stages.sql,MIGRATION,included,quality + project_manager workflow stages
-38,047,current,migrations/047_claim_kind_and_number.sql,MIGRATION,included,"claim_kind, claim_number, partial unique"
-39,048,current,migrations/048_create_claim_with_items_atomic.sql,MIGRATION,included,atomic create RPC
-40,049,current,migrations/049_fix_claim_rpc_item_no_cast.sql,MIGRATION,included,RPC item_no cast fix
-41,050,current,migrations/050_fix_claim_rpc_claim_type_cast.sql,MIGRATION,included,RPC claim_type cast removal
-42,s001,legacy,seeds/001_seed_profiles.sql,SEED,included,profiles bootstrap
-43,s002,legacy,seeds/002_seed_contracts.sql,SEED,included,contracts incl. CMH_01-C01
-44,s003,legacy,seeds/003_seed_convera_users.sql,SEED,included,official MoMaH users
-45,s004,legacy,seeds/004_seed_supabase_auth_users.sql,SEED,included,auth.users bootstrap
-46,s005,current,seeds/005_seed_test_users_cmh.sql,SEED,included,IAM-3 aligned test users
+1,001,legacy,migrations/001_base_schema.sql,MIGRATION,included,foundational base schema (March 16) — establishes profiles/contracts/claims/...
+2,002,legacy,migrations/002_step0_fixes.sql,MIGRATION,included,step 0 fixes + storage buckets
+3,003,legacy,migrations/003_change_orders_and_hardening.sql,MIGRATION,included,change_orders + change_order_boq_items + change_order_staff_items + workflow
+4,004,legacy,migrations/004_contract_templates_and_progress_models.sql,MIGRATION,included,contract_boq_templates + contract_staff_templates + boq_progress_model enum
+5,006,legacy,migrations/006_convera_users_otp.sql,MIGRATION,included,CONVERA_USERS + convera_otp tables
+6,007,legacy,migrations/007_contract_amendments_enhancement.sql,MIGRATION,included,contract amendments enhancement
+7,008,legacy,migrations/008_invoice_attachment_governance.sql,MIGRATION,included,invoice attachment governance
+8,009,legacy,migrations/009_rename_claim_statuses.sql,MIGRATION,included,rename claim status enum values
+9,010b,legacy,migrations/010_user_contracts.sql,MIGRATION,included,user_contracts (m2m) — additive on top of 001
+10,011,legacy,migrations/011_fix_rls_returned_statuses.sql,MIGRATION,included,RLS fix returned statuses
+11,012,legacy,migrations/012_fix_rls_workflow_roles.sql,MIGRATION,included,RLS fix workflow roles
+12,013,legacy,migrations/013_fix_trigger_security_definer.sql,MIGRATION,included,trigger SECURITY DEFINER fix
+13,014,legacy,migrations/014_db_level_transition_guard.sql,MIGRATION,included,DB-level transition guard
+14,016,legacy,migrations/016_update_contract_types.sql,MIGRATION,included,contract_type enum updates
+15,017,legacy,migrations/017_fix_contracts_rls_user_contracts.sql,MIGRATION,included,RLS fix contracts/user_contracts join
+16,019,legacy,migrations/019_definitive_rls_scope_fix.sql,MIGRATION,included,definitive RLS scoping
+17,020,legacy,migrations/020_fix_internal_role_policies.sql,MIGRATION,included,internal-role policy fixes
+18,021,legacy,migrations/021_sync_auth_bans_and_verify.sql,MIGRATION,included,auth bans sync
+19,022,legacy,migrations/022_fix_profiles_recursion.sql,MIGRATION,included,profiles RLS recursion fix
+20,023,legacy,migrations/023_fix_contract_scoping_leaks.sql,MIGRATION,included,plug contract-scoping leaks
+21,024,legacy,migrations/024_drop_contracts_auth_read_backdoor.sql,MIGRATION,included,remove auth-read backdoor on contracts
+22,025,legacy,migrations/025_contract_scoped_roles.sql,MIGRATION,included,introduce user_contract_roles
+23,026,legacy,migrations/026_rls_contract_scoped_roles.sql,MIGRATION,included,RLS for contract-scoped roles
+24,027,legacy,migrations/027_contract_role_browser_helpers.sql,MIGRATION,included,browser helpers for contract roles
+25,028,legacy,migrations/028_add_last_transition_at.sql,MIGRATION,included,last_transition_at column
+26,029,legacy,migrations/029_contractor_withdraw_action.sql,MIGRATION,included,contractor withdraw action
+27,030,legacy,migrations/030_completion_certificate_and_cancel.sql,MIGRATION,included,completion-cert + cancel actions
+28,031,legacy,migrations/031_atomic_claim_submission.sql,MIGRATION,included,predecessor atomic-submission RPC
+29,031b,legacy,migrations/031b_fix_audit_logs_columns.sql,MIGRATION,included,audit_logs column fix
+30,033,legacy,migrations/033_fix_document_type_enum.sql,MIGRATION,included,document_type enum fix
+31,034,legacy,migrations/034_audit_helper_function.sql,MIGRATION,included,audit helper function
+32,035,legacy,migrations/035_block_submitted_persist.sql,MIGRATION,included,block submitted persistence
+33,040,current,migrations/040_flexible_approvers_and_import.sql,MIGRATION,included,flexible approvers (newer)
+34,041,current,migrations/041_final_approver_role.sql,MIGRATION,included,final_approver role (newer)
+35,042,legacy,migrations/042_extend_enums_for_template_v7.sql,MIGRATION,included,enum extension (full version)
+36,043,legacy,migrations/043_data_model_hardening_SAFE.sql,MIGRATION,included,D2 hardening SAFE variant
+37,044,current,migrations/044_imports_governance.sql,MIGRATION,included,imports governance (newer)
+38,045,legacy,migrations/045_contract_role_multi_assignment.sql,MIGRATION,included,3-tuple unique invariant
+39,046,current,migrations/046_quality_and_pm_stages.sql,MIGRATION,included,quality + project_manager workflow stages
+40,047,current,migrations/047_claim_kind_and_number.sql,MIGRATION,included,"claim_kind, claim_number, partial unique"
+41,048,current,migrations/048_create_claim_with_items_atomic.sql,MIGRATION,included,atomic create RPC
+42,049,current,migrations/049_fix_claim_rpc_item_no_cast.sql,MIGRATION,included,RPC item_no cast fix
+43,050,current,migrations/050_fix_claim_rpc_claim_type_cast.sql,MIGRATION,included,RPC claim_type cast removal
+44,s001,legacy,seeds/001_seed_profiles.sql,SEED,included,profiles bootstrap
+45,s002,legacy,seeds/002_seed_contracts.sql,SEED,included,contracts incl. CMH_01-C01
+46,s003,legacy,seeds/003_seed_convera_users.sql,SEED,included,official MoMaH users
+47,s004,legacy,seeds/004_seed_supabase_auth_users.sql,SEED,included,auth.users bootstrap
+48,s005,current,seeds/005_seed_test_users_cmh.sql,SEED,included,IAM-3 aligned test users

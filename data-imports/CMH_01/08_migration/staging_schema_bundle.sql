@@ -1,18 +1,23 @@
 -- ════════════════════════════════════════════════════════════════════
---  CMH_01 — STAGING Schema Bundle  v2.2 (generated-column subquery fix)
+--  CMH_01 — STAGING Schema Bundle  v2.3 (true Path A)
 --  Authored: 2026-05-07
 --
 --  Target:    STAGING ONLY  —  project ref  jrqkzwacerdudmeacvar
 --  FORBIDDEN: production project ref  ngwxlockzkjpmzuvgakx
 --
---  v2.2 changes vs v2.1 (commit 3e9ff65):
---    • Source fix to 010_production_schema.sql — replaced two GENERATED
---      ALWAYS AS expressions on claim_boq_items.period_amount and
---      claim_boq_items.after_perf_amount that contained subqueries
---      (PG error 0A000) with a denormalized progress_model column on the
---      same row. DEFAULT 'count' preserves the original CASE ELSE branch.
---    • The platform RPC (Migration 048) is responsible for setting
---      progress_model from contract_boq_templates at insert time.
+--  v2.3 changes vs v2.2 (commit 61428a9):
+--    • Reverted Path B. The earlier hypothesis that 010_production_schema
+--      was an additive consolidation snapshot was wrong: that file uses a
+--      different access model (director_id + contract_assignments) that
+--      the rest of the migration chain does NOT use. Sections 003, 004,
+--      010_user_contracts, 019, 023, 024, 025, 026 (and seed 002) all
+--      reference contracts.external_user_id, which only 001 creates.
+--    • TRUE Path A — keep the 001-009 evolution chain as the foundation.
+--      Skip ONLY 010_production_schema.sql (parallel-universe variant).
+--    • Removed the synthetic change_order_staff_items patch (003 creates
+--      it, plus change_order_boq_items, change_order_workflow, etc.).
+--    • Reordered to original numeric sequence — no relocation of
+--      002/006/007/008.
 --
 --  Operator instructions:
 --    1. Verify staging is clean (run pre-check; expect public_table_count = 0).
@@ -34,28 +39,13 @@ BEGIN
 END $$;
 
 
--- ─── SKIPPED — 001 (legacy) — 001_base_schema.sql ───
--- Reason: REDUNDANT — superseded by 010_production_schema v2.0 snapshot
--- (skipped)
-
-
--- ─── SKIPPED — 003 (legacy) — 003_change_orders_and_hardening.sql ───
--- Reason: REDUNDANT with 010 (only piece 010 misses — change_order_staff_items — added as synthetic patch below)
--- (skipped)
-
-
--- ─── SKIPPED — 004 (legacy) — 004_contract_templates_and_progress_models.sql ───
--- Reason: REDUNDANT — 010 already creates contract_boq_templates + contract_staff_templates
--- (skipped)
-
-
--- ─── SKIPPED — 009 (legacy) — 009_rename_claim_statuses.sql ───
--- Reason: REDUNDANT — 010 v2.0 enum already uses the renamed claim statuses
+-- ─── SKIPPED — 010a (legacy) — 010_production_schema.sql ───
+-- Reason: PARALLEL UNIVERSE — v2.0 standalone snapshot that uses director_id + contract_assignments instead of contracts.external_user_id. Sections 003, 004, 010_user_contracts, 019, 023, 024, 025, 026 (and seed 002) all reference contracts.external_user_id which 010_production_schema does NOT create. Skipping 010 keeps the migration chain self-consistent on the 001 foundation.
 -- (skipped)
 
 
 -- ─── SKIPPED — 015 (legacy) — 015_fix_contract_231001101771_templates.sql ───
--- Reason: PRODUCTION-ONLY data fix
+-- Reason: PRODUCTION-ONLY data fix for a real-life contract
 -- (skipped)
 
 
@@ -65,1333 +55,1098 @@ END $$;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 1  —  MIGRATION  —  seq=foundation
---  Source: legacy: migrations/010_production_schema.sql
---  Reason: foundational v2.0 snapshot — REORDERED to apply first  [PATCHED 2026-05-07: CONSTRAINT…AS→CHECK + GENERATED…SELECT→denormalized progress_model]
+--  STEP 1  —  MIGRATION  —  seq=001
+--  Source: legacy: migrations/001_base_schema.sql
+--  Reason: foundational base schema (March 16) — establishes profiles/contracts/claims/...
 -- ════════════════════════════════════════════════════════════════════
--- ============================================================================
--- CONVERA — Production PostgreSQL Schema
--- Saudi Ministry of Municipalities and Housing (MoMaH)
--- Contract Oversight & Governance Platform
+-- ═══════════════════════════════════════════════════════════════════
+--  CONVERA — Base Schema (Bootstrap Safe)
+--  File:    001_base_schema.sql
+--  Project: Contract Oversight & Governance Platform
+--  Client:  وزارة البلديات والإسكان — إدارة التطوير والتأهيل
 --
--- Generated: 2026-03-19
--- Version: 2.0 (Production-Grade with Full RLS, Triggers, and Audit Trail)
--- ============================================================================
+--  Run order: 1 of 5  (after 000_reset if rebuilding)
+--  Depends on: Supabase Auth (auth.users must exist)
+--
+--  Contents:
+--    A. Extensions
+--    B. ENUM types (7 types)
+--    C. Core tables
+--         1.  profiles          — extends auth.users
+--         2.  contracts         — contract master records
+--         3.  contract_amendments — formal amendments (pre-CO model)
+--         4.  claims            — financial claims (المستخلصات)
+--         5.  claim_boq_items   — BOQ line items per claim
+--         6.  claim_staff_items — staff/manpower line items per claim
+--         7.  claim_workflow    — full audit trail of workflow transitions
+--         8.  documents         — uploaded files (Supabase Storage references)
+--         9.  audit_logs        — system-wide immutable audit log
+--        10.  notifications     — per-user notification inbox
+--        11.  kpi_snapshots     — periodic financial KPI snapshots
+--    D. Indexes
+--    E. Functions & Triggers
+--    F. Row Level Security (RLS) — all tables
+--    G. Views (claims_full, contracts_summary)
+--
+--  Bootstrap notes:
+--    This file is safe to run on a brand new empty Supabase project.
+--    change_order_id FK columns on claim_boq_items and claim_staff_items
+--    are intentionally deferred to 003 because they reference change_orders,
+--    which is created in migration 003. The RLS guards for those columns
+--    are also added in 003.
+--
+--  Design notes:
+--    • claim_boq_items.prev_progress and curr_progress use NUMERIC(10,4)
+--      to support the 'count' progress model where values may be decimal
+--      (e.g. 0.6667 for partial completion) or exceed 1.
+--    • contracts.vat_value and total_value are GENERATED columns (15% VAT).
+--    • claims.gross_amount, net_amount, total_amount are GENERATED columns.
+--    • retention_pct default is 5.00 — the standard KSA government rate.
+--    • No seed data. Run 002–004 migrations before inserting any records.
+-- ═══════════════════════════════════════════════════════════════════
 
--- Enable necessary extensions
+
+-- ─────────────────────────────────────────────────────────────────
+--  A. EXTENSIONS
+-- ─────────────────────────────────────────────────────────────────
+
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pg_trgm";  -- For full-text search support
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- ============================================================================
--- SECTION 1: ENUMS
--- ============================================================================
 
--- User roles in the system
+-- ─────────────────────────────────────────────────────────────────
+--  B. ENUM TYPES
+-- ─────────────────────────────────────────────────────────────────
+
 CREATE TYPE user_role AS ENUM (
-  'director',      -- Ministry director — final approval authority
-  'reviewer',      -- Senior reviewer — منصة اعتماد alignment check
-  'auditor',       -- Financial auditor — claim validation
-  'supervisor',    -- Supervisory consultant — external, first review
-  'contractor'     -- Contract performer — claim submitter
+  'director',     -- مدير الإدارة — full access, final approval authority
+  'admin',        -- مدقق / مسؤول — review, manage, forward to director
+  'reviewer',     -- مراجع — can review claims and return with notes
+  'consultant',   -- استشاري (external) — submit & track own claims
+  'contractor'    -- مقاول (external) — submit & track own claims
 );
 
--- Contract statuses
 CREATE TYPE contract_status AS ENUM (
-  'draft',         -- Not yet active
-  'active',        -- In execution
-  'completed',     -- Work finished
-  'suspended',     -- Temporarily halted
-  'closed'         -- Finalized and archived
+  'draft',
+  'active',
+  'suspended',
+  'completed',
+  'closed'
 );
 
--- Contract types (from SRD)
 CREATE TYPE contract_type AS ENUM (
-  'design',
-  'supervision',
-  'design_supervision',
-  'construction',
-  'consultancy',
-  'maintenance'
+  'design',               -- دراسات وتصاميم
+  'supervision',          -- إشراف هندسي
+  'design_supervision',   -- دراسات وتصاميم وإشراف
+  'construction',         -- تنفيذ
+  'consultancy',          -- استشارات
+  'maintenance'           -- صيانة
 );
 
--- BOQ progress calculation model
-CREATE TYPE boq_progress_model AS ENUM (
-  'count',               -- Item count (units)
-  'percentage',          -- Percentage completion (0-100)
-  'monthly_lump_sum'     -- Fixed monthly amount
-);
-
--- Claim statuses (9 states in 5-stage workflow)
+-- Full 10-state claim lifecycle.
+-- Transitions are enforced by the WorkflowActions component and server actions.
+-- The variation trigger (migration 003) adds a DB-level guard on the
+-- draft→approved and submitted→approved paths.
 CREATE TYPE claim_status AS ENUM (
-  'draft',                       -- Created, not submitted
-  'submitted',                   -- Submitted, awaiting supervisor
-  'under_supervisor_review',     -- Supervisor reviewing
-  'returned_by_supervisor',      -- Returned to contractor by supervisor
-  'under_auditor_review',        -- Auditor reviewing
-  'returned_by_auditor',         -- Returned to contractor by auditor
-  'under_reviewer_check',        -- Reviewer checking اعتماد alignment
-  'pending_director_approval',   -- Director final review
-  'approved',                    -- Approved and finalized
-  'rejected'                     -- Rejected permanently
-);
-
--- Claim types
-CREATE TYPE claim_type AS ENUM (
-  'boq_only',      -- Only BOQ items
-  'staff_only',    -- Only staff items
-  'mixed',         -- Both BOQ and staff
-  'supervision'    -- Supervision claim
-);
-
--- Change order types
-CREATE TYPE change_order_type AS ENUM (
-  'addition',              -- Add new BOQ item or staff position
-  'quantity_modification', -- Change quantity of existing item
-  'deletion',              -- Remove item
-  'duration_extension'     -- Extend contract duration (no financial impact)
-);
-
--- Change order statuses
-CREATE TYPE change_order_status AS ENUM (
   'draft',
   'submitted',
-  'under_auditor_review',
-  'under_reviewer_check',
+  'under_consultant_review',
+  'returned_by_consultant',
+  'under_admin_review',
+  'returned_by_admin',
   'pending_director_approval',
   'approved',
   'rejected',
-  'cancelled'
+  'closed'
 );
 
--- Document types
 CREATE TYPE document_type AS ENUM (
-  'invoice',              -- Required before claim approval
-  'technical_report',     -- Required before claim approval
-  'completion_certificate', -- Auto-generated
-  'review_form',         -- Auto-generated
+  'contract',
+  'claim',
+  'invoice',
+  'approval',
+  'report',
   'other'
 );
 
--- Certificate types
-CREATE TYPE certificate_type AS ENUM (
-  'completion_certificate',
-  'review_form'
+CREATE TYPE audit_action AS ENUM (
+  'create', 'update', 'delete',
+  'submit', 'review', 'approve', 'reject', 'return', 'close',
+  'login', 'logout', 'upload', 'download'
 );
 
--- Notification types
 CREATE TYPE notification_type AS ENUM (
   'claim_submitted',
+  'claim_reviewed',
   'claim_approved',
-  'claim_returned',
   'claim_rejected',
-  'supervisor_sla_warning',      -- Day 2 warning
-  'supervisor_sla_escalation',   -- Day 3 escalation
-  'change_order_submitted',
-  'change_order_approved',
-  'change_order_returned',
-  'change_order_rejected',
-  'change_order_limit_warning'   -- Approaching 90% limit
+  'claim_returned',
+  'contract_updated',
+  'user_assigned',
+  'document_uploaded',
+  'system'
+  -- change_order notification values added in migration 003
 );
 
--- ============================================================================
--- SECTION 2: CORE TABLES
--- ============================================================================
 
--- User profiles (linked to Supabase auth.users)
+-- ─────────────────────────────────────────────────────────────────
+--  C. TABLES
+-- ─────────────────────────────────────────────────────────────────
+
+-- ── C1. profiles ──────────────────────────────────────────────────
+-- Extends Supabase Auth users. Created automatically via trigger on
+-- auth.users INSERT. All application queries join through this table.
+
 CREATE TABLE profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email TEXT UNIQUE NOT NULL,
-  role user_role NOT NULL,
-  full_name_ar TEXT NOT NULL,
-  full_name_en TEXT,
-  organization TEXT,                   -- Department or company name
-  phone TEXT,
-  avatar_url TEXT,                     -- Path in Supabase Storage (avatars bucket)
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-
-  -- Constraints
-  CONSTRAINT email_normalized CHECK (email = LOWER(TRIM(email))),
-  CONSTRAINT phone_format CHECK (phone ~ '^\+?[0-9\-\s]+$' OR phone IS NULL)
+  id              UUID         PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email           TEXT         NOT NULL UNIQUE,
+  full_name       TEXT         NOT NULL,
+  full_name_ar    TEXT,
+  role            user_role    NOT NULL DEFAULT 'contractor',
+  phone           TEXT,
+  phone_masked    TEXT,                      -- e.g. +966 *** *** 602
+  organization    TEXT,
+  job_title       TEXT,
+  avatar_url      TEXT,
+  is_active       BOOLEAN      NOT NULL DEFAULT true,
+  is_verified     BOOLEAN      NOT NULL DEFAULT false,
+  last_login_at   TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_profiles_role ON profiles(role);
-CREATE INDEX idx_profiles_organization ON profiles(organization);
-CREATE INDEX idx_profiles_is_active ON profiles(is_active);
+COMMENT ON TABLE profiles IS
+  'Application user profiles. One row per auth.users row. '
+  'Created automatically by the on_auth_user_created trigger. '
+  'All role-based access control derives from the role column.';
 
--- Contracts registry
+
+-- ── C2. contracts ─────────────────────────────────────────────────
+
 CREATE TABLE contracts (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  contract_no TEXT UNIQUE NOT NULL,       -- e.g., "MOMAH-2025-001"
-  type contract_type NOT NULL,
-  title_ar TEXT NOT NULL,
-  title_en TEXT,
-  description_ar TEXT,
+  id               UUID            PRIMARY KEY DEFAULT uuid_generate_v4(),
+  contract_no      TEXT            NOT NULL UNIQUE,  -- e.g. 231001101771
+  title            TEXT            NOT NULL,
+  title_ar         TEXT            NOT NULL,
+  type             contract_type   NOT NULL,
+  status           contract_status NOT NULL DEFAULT 'draft',
 
-  -- Financial terms
-  base_value NUMERIC(15,2) NOT NULL CHECK (base_value > 0),
-  vat_rate NUMERIC(5,2) DEFAULT 15.00 CHECK (vat_rate >= 0 AND vat_rate <= 100),
-  retention_pct NUMERIC(5,2) DEFAULT 10.00 CHECK (retention_pct >= 0 AND retention_pct <= 100),
+  -- Parties
+  party_name       TEXT            NOT NULL,          -- contractor/consultant EN name
+  party_name_ar    TEXT,                              -- contractor/consultant AR name
+  party_tax_no     TEXT,                              -- رقم التعريف الضريبي
 
-  -- Technical details
-  boq_progress_model boq_progress_model DEFAULT 'count',
-  start_date DATE NOT NULL,
-  end_date DATE NOT NULL,
+  -- Financials
+  -- base_value: contract value before VAT (القيمة الأساسية)
+  -- vat_value / total_value: GENERATED at 15% KSA VAT
+  base_value       NUMERIC(15,2)   NOT NULL DEFAULT 0,
+  vat_value        NUMERIC(15,2)   GENERATED ALWAYS AS (ROUND(base_value * 0.15, 2)) STORED,
+  total_value      NUMERIC(15,2)   GENERATED ALWAYS AS (ROUND(base_value * 1.15, 2)) STORED,
 
-  -- Status and ownership
-  status contract_status DEFAULT 'draft',
-  director_id UUID NOT NULL REFERENCES profiles(id),
+  -- حجز الختامي — standard KSA rate is 5%
+  -- Some contracts (e.g. 241039011332) have 0% retention applied to claims
+  -- even though the performance bond guarantee is 5%.
+  retention_pct    NUMERIC(5,2)    NOT NULL DEFAULT 5.00,
+
+  -- Dates
+  start_date       DATE,
+  end_date         DATE,
+  duration_months  INTEGER,
+
+  -- Location
+  region           TEXT            DEFAULT 'الرياض',
+
+  -- Team assignment
+  director_id      UUID            REFERENCES profiles(id),
+  admin_id         UUID            REFERENCES profiles(id),
+  reviewer_id      UUID            REFERENCES profiles(id),
+  external_user_id UUID            REFERENCES profiles(id), -- consultant/contractor
 
   -- Metadata
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-
-  -- Constraints
-  CONSTRAINT valid_date_range CHECK (end_date > start_date)
+  description      TEXT,
+  notes            TEXT,
+  created_by       UUID            NOT NULL REFERENCES profiles(id),
+  updated_by       UUID            REFERENCES profiles(id),
+  created_at       TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ     NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_contracts_contract_no ON contracts(contract_no);
-CREATE INDEX idx_contracts_type ON contracts(type);
-CREATE INDEX idx_contracts_status ON contracts(status);
-CREATE INDEX idx_contracts_director_id ON contracts(director_id);
-CREATE INDEX idx_contracts_date_range ON contracts(start_date, end_date);
+COMMENT ON TABLE contracts IS
+  'Contract master records. Each contract has one external user (consultant or contractor) '
+  'and one or more internal team members (director, admin, reviewer). '
+  'boq_progress_model column added in migration 004.';
 
--- Contract role assignments (auditor, reviewer, supervisor)
-CREATE TABLE contract_assignments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  contract_id UUID NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  role user_role NOT NULL CHECK (role IN ('auditor', 'reviewer', 'supervisor')),
-  assigned_by UUID NOT NULL REFERENCES profiles(id),
-  assigned_at TIMESTAMPTZ DEFAULT NOW(),
+COMMENT ON COLUMN contracts.retention_pct IS
+  'Percentage of each claim retained as performance guarantee (حجز الختامي). '
+  'Defaults to 5%. Some contracts may have 0% based on ministry decisions. '
+  'This value is suggested to the user when creating a claim; they may override it.';
 
-  -- Prevent duplicate assignments
-  UNIQUE(contract_id, user_id, role)
+
+-- ── C3. contract_amendments ───────────────────────────────────────
+-- Formal contract amendments (not the same as Change Orders).
+-- Amendments affect the contract header (value, duration).
+-- Change Orders (migration 003) affect the scope/BOQ/staff.
+
+CREATE TABLE contract_amendments (
+  id              UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  contract_id     UUID         NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+  amendment_no    TEXT         NOT NULL,
+  title           TEXT         NOT NULL,
+  description     TEXT,
+  value_change    NUMERIC(15,2) NOT NULL DEFAULT 0,   -- positive = increase, negative = reduction
+  duration_change INTEGER       DEFAULT 0,            -- months added (positive) or removed (negative)
+  status          TEXT         NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'approved', 'rejected')),
+  approved_by     UUID         REFERENCES profiles(id),
+  approved_at     TIMESTAMPTZ,
+  created_by      UUID         NOT NULL REFERENCES profiles(id),
+  created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_contract_assignments_contract ON contract_assignments(contract_id);
-CREATE INDEX idx_contract_assignments_user ON contract_assignments(user_id);
-CREATE INDEX idx_contract_assignments_role ON contract_assignments(role);
 
--- Contract BOQ templates (line items)
-CREATE TABLE contract_boq_templates (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  contract_id UUID NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
-  item_no INTEGER NOT NULL,              -- Sequence in BOQ
-  description_ar TEXT NOT NULL,
-  description_en TEXT,
-  unit TEXT NOT NULL,                    -- e.g., "m2", "m3", "LS"
-  unit_price NUMERIC(15,2) NOT NULL CHECK (unit_price > 0),
-  contractual_qty NUMERIC(12,4) NOT NULL CHECK (contractual_qty > 0),
-  progress_model boq_progress_model NOT NULL,
+-- ── C4. claims ────────────────────────────────────────────────────
+-- Financial claims (المستخلصات). Each claim belongs to a contract.
+-- claim_no is sequential per contract, auto-set by trigger.
 
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-
-  -- Constraints
-  UNIQUE(contract_id, item_no)
-);
-
-CREATE INDEX idx_contract_boq_templates_contract ON contract_boq_templates(contract_id);
-
--- Contract staff templates (recurring cost items)
-CREATE TABLE contract_staff_templates (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  contract_id UUID NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
-  position_ar TEXT NOT NULL,
-  position_en TEXT,
-  monthly_rate NUMERIC(12,2) NOT NULL CHECK (monthly_rate > 0),
-  contract_months INTEGER NOT NULL CHECK (contract_months > 0),
-
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_contract_staff_templates_contract ON contract_staff_templates(contract_id);
-
--- ============================================================================
--- SECTION 3: CLAIMS TABLES
--- ============================================================================
-
--- Claims (payment requests)
 CREATE TABLE claims (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  contract_id UUID NOT NULL REFERENCES contracts(id),
-  claim_no TEXT NOT NULL,                -- Sequential per contract
-  claim_type claim_type NOT NULL DEFAULT 'mixed',
-  status claim_status NOT NULL DEFAULT 'draft',
+  id               UUID           PRIMARY KEY DEFAULT uuid_generate_v4(),
+  claim_no         INTEGER        NOT NULL,
+  contract_id      UUID           NOT NULL REFERENCES contracts(id) ON DELETE RESTRICT,
+  reference_no     TEXT,                              -- الرقم المرجعي / منصة اعتماد ref
 
-  -- Period
-  period_from DATE NOT NULL,
-  period_to DATE NOT NULL,
+  status           claim_status   NOT NULL DEFAULT 'draft',
 
-  -- Performance (defaults to 100%, modifiable by supervisor only)
-  performance_pct NUMERIC(5,2) DEFAULT 100.00
-    CHECK (performance_pct >= 0 AND performance_pct <= 100),
-  performance_pct_set_by UUID REFERENCES profiles(id),  -- Track who set it
+  -- Claim period
+  period_from      DATE,
+  period_to        DATE,
+  invoice_date     DATE,
 
-  -- Financial amounts (some auto-calculated)
-  boq_amount NUMERIC(15,2) DEFAULT 0.00,
-  staff_amount NUMERIC(15,2) DEFAULT 0.00,
-  gross_amount NUMERIC(15,2) GENERATED ALWAYS AS (boq_amount + staff_amount) STORED,
-  retention_amount NUMERIC(15,2) GENERATED ALWAYS AS (
-    (boq_amount + staff_amount) * retention_pct / 100
-  ) STORED,
-  net_amount NUMERIC(15,2) GENERATED ALWAYS AS (
-    (boq_amount + staff_amount) - ((boq_amount + staff_amount) * retention_pct / 100)
-  ) STORED,
-  vat_amount NUMERIC(15,2) GENERATED ALWAYS AS (
-    ((boq_amount + staff_amount) - ((boq_amount + staff_amount) * retention_pct / 100)) * vat_rate / 100
-  ) STORED,
-  total_amount NUMERIC(15,2) GENERATED ALWAYS AS (
-    ((boq_amount + staff_amount) - ((boq_amount + staff_amount) * retention_pct / 100)) +
-    (((boq_amount + staff_amount) - ((boq_amount + staff_amount) * retention_pct / 100)) * vat_rate / 100)
-  ) STORED,
+  -- Financials
+  -- boq_amount:    sum of claim_boq_items.after_perf
+  -- staff_amount:  sum of claim_staff_items.after_perf
+  -- gross_amount:  boq + staff (GENERATED)
+  -- retention_amount: explicitly set — user may override the formula suggestion
+  -- net_amount:    gross - retention (GENERATED)
+  -- vat_amount:    explicitly set — server action computes net × 0.15
+  -- total_amount:  net + vat (GENERATED)
+  boq_amount       NUMERIC(15,2)  NOT NULL DEFAULT 0,
+  staff_amount     NUMERIC(15,2)  NOT NULL DEFAULT 0,
+  gross_amount     NUMERIC(15,2)  GENERATED ALWAYS AS (boq_amount + staff_amount) STORED,
+  retention_amount NUMERIC(15,2)  NOT NULL DEFAULT 0,
+  net_amount       NUMERIC(15,2)  GENERATED ALWAYS AS (boq_amount + staff_amount - retention_amount) STORED,
+  vat_amount       NUMERIC(15,2)  NOT NULL DEFAULT 0,
+  total_amount     NUMERIC(15,2)  GENERATED ALWAYS AS (boq_amount + staff_amount - retention_amount + vat_amount) STORED,
 
-  -- Retention and VAT (from contract)
-  retention_pct NUMERIC(5,2) NOT NULL DEFAULT 10.00,
-  vat_rate NUMERIC(5,2) NOT NULL DEFAULT 15.00,
+  -- Performance
+  performance_rating    NUMERIC(3,2) DEFAULT 1.00,   -- 0.00 to 1.00
+  performance_deduction NUMERIC(15,2) DEFAULT 0,
 
-  -- SLA tracking
-  supervisor_review_started_at TIMESTAMPTZ,
-  sla_breached BOOLEAN DEFAULT false,
+  -- claim_type: computed by server action from boq/staff amounts
+  -- Added here with a wide default so migration 003 ALTER TABLE ADD COLUMN
+  -- works without data migration. The CHECK constraint is the DB safety net.
+  -- Values: boq_only | staff_only | mixed | supervision
+  claim_type       TEXT           NOT NULL DEFAULT 'mixed'
+    CONSTRAINT claims_claim_type_check
+    CHECK (claim_type IN ('boq_only', 'staff_only', 'mixed', 'supervision')),
 
-  -- Audit
-  submitted_by UUID REFERENCES profiles(id),
-  submitted_at TIMESTAMPTZ,
+  -- People
+  submitted_by     UUID           REFERENCES profiles(id),
+  reviewed_by      UUID           REFERENCES profiles(id),
+  approved_by      UUID           REFERENCES profiles(id),
 
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  -- Notes
+  submission_notes TEXT,
+  review_notes     TEXT,
+  rejection_reason TEXT,
+  return_reason    TEXT,
 
-  -- Constraints
-  CONSTRAINT valid_period CHECK (period_to > period_from),
-  CONSTRAINT unique_claim_no UNIQUE(contract_id, claim_no)
+  -- Timestamps
+  submitted_at     TIMESTAMPTZ,
+  reviewed_at      TIMESTAMPTZ,
+  approved_at      TIMESTAMPTZ,
+  created_by       UUID           NOT NULL REFERENCES profiles(id),
+  updated_by       UUID           REFERENCES profiles(id),
+  created_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT claims_contract_no_unique UNIQUE (contract_id, claim_no)
 );
 
-CREATE INDEX idx_claims_contract_id ON claims(contract_id);
-CREATE INDEX idx_claims_status ON claims(status);
-CREATE INDEX idx_claims_submitted_by ON claims(submitted_by);
-CREATE INDEX idx_claims_period ON claims(period_from, period_to);
-CREATE INDEX idx_claims_sla_breached ON claims(sla_breached) WHERE sla_breached = true;
+COMMENT ON TABLE claims IS
+  'Financial claims (المستخلصات). Sequential per contract. '
+  'Financials are set by server action computeClaimTotals(). '
+  'Gross, net, and total are GENERATED columns. '
+  'The variation trigger (migration 003) blocks status → approved if '
+  'any BOQ item has requires_variation=TRUE and no resolution.';
 
--- Claim BOQ line items
+COMMENT ON COLUMN claims.claim_type IS
+  'Computed by server action: '
+  'boq_only (BOQ > 0, staff = 0), staff_only (staff > 0, BOQ = 0), '
+  'mixed (both > 0 or both = 0), supervision (only monthly_lump_sum BOQ). '
+  'Set on every save. Never set by the client directly.';
+
+COMMENT ON COLUMN claims.retention_amount IS
+  'Explicitly stored — not GENERATED — because users may override the formula '
+  'suggestion (gross × retention_pct%). The server action pre-fills the suggested '
+  'amount; the user may change it (e.g. to 0 after the ministry waives retention).';
+
+
+-- ── C5. claim_boq_items ───────────────────────────────────────────
+-- One row per BOQ line item per claim.
+-- Populated from contract_boq_templates at claim creation time.
+-- progress_model, contractual_qty, and variation columns added in migration 004.
+
 CREATE TABLE claim_boq_items (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  claim_id UUID NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
-  template_item_id UUID NOT NULL REFERENCES contract_boq_templates(id),
+  id               UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  claim_id         UUID          NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  item_no          INTEGER       NOT NULL,
+  description      TEXT          NOT NULL,
+  description_ar   TEXT,
+  unit             TEXT          DEFAULT 'عدد',
+  unit_price       NUMERIC(15,2) NOT NULL DEFAULT 0,
 
-  -- Cumulative progress tracking
-  prev_cumulative_qty NUMERIC(12,4) DEFAULT 0.00,  -- Progress from prior claims
-  curr_progress NUMERIC(12,4) NOT NULL,             -- This claim's progress
+  -- Progress tracking
+  -- NUMERIC(10,4) to support count model (e.g. 0.6667, 2.0) and large decimal values
+  prev_progress    NUMERIC(10,4) DEFAULT 0,   -- cumulative progress before this claim
+  curr_progress    NUMERIC(10,4) DEFAULT 0,   -- progress added in this claim period
+  period_amount    NUMERIC(15,2) DEFAULT 0,   -- curr × unit_price (count) or (curr/100) × price (pct)
 
-  -- Denormalized progress model (PATCHED 2026-05-07)
-  -- PostgreSQL forbids subqueries inside GENERATED ALWAYS AS expressions
-  -- (error 0A000), so progress_model must be stored locally on the row.
-  -- The platform RPC (create_claim_with_items_atomic, Migration 048) is
-  -- responsible for copying the value from contract_boq_templates at insert.
-  -- DEFAULT 'count' matches the ELSE branch of the original CASE expression
-  -- so legacy inserts that do not set this column produce the same result.
-  progress_model boq_progress_model NOT NULL DEFAULT 'count',
+  -- Performance
+  performance_pct  NUMERIC(5,2)  DEFAULT 100, -- reviewer-set deduction (0–100)
+  after_perf       NUMERIC(15,2) DEFAULT 0,   -- period_amount × (performance_pct/100)
+  cumulative       NUMERIC(15,2) DEFAULT 0,   -- (prev + curr) × unit_price
 
-  -- Calculated amounts
-  unit_price NUMERIC(15,2) NOT NULL,
-  period_amount NUMERIC(15,2) GENERATED ALWAYS AS (
-    CASE
-      WHEN progress_model = 'count'
-        THEN curr_progress * unit_price
-      WHEN progress_model = 'percentage'
-        THEN (curr_progress / 100.0) * unit_price
-      ELSE curr_progress * unit_price  -- monthly_lump_sum
-    END
-  ) STORED,
+  -- Progress model (item-level override — see migration 004 for full semantics)
+  -- NULL = inherit from contracts.boq_progress_model
+  -- Valid values: count | percentage | monthly_lump_sum
+  progress_model   TEXT
+    CONSTRAINT claim_boq_items_progress_model_check
+    CHECK (progress_model IN ('count', 'percentage', 'monthly_lump_sum')),
 
-  performance_pct NUMERIC(5,2) NOT NULL DEFAULT 100.00,
-  after_perf_amount NUMERIC(15,2) GENERATED ALWAYS AS (
-    (CASE
-      WHEN progress_model = 'count'
-        THEN curr_progress * unit_price
-      WHEN progress_model = 'percentage'
-        THEN (curr_progress / 100.0) * unit_price
-      ELSE curr_progress * unit_price
-    END) * performance_pct / 100.0
-  ) STORED,
+  -- Variation tracking
+  -- contractual_qty: threshold for requires_variation (count/monthly_lump_sum models)
+  -- change_order_id: added in migration 003 after change_orders table is created
+  contractual_qty        NUMERIC(10,4) NOT NULL DEFAULT 1,
+  requires_variation     BOOLEAN       NOT NULL DEFAULT false,
+  -- change_order_id deferred to 003 (FK to change_orders, created in 003)
+  variation_override_by  UUID          REFERENCES profiles(id),
+  variation_override_notes TEXT,
+  variation_override_at  TIMESTAMPTZ,
 
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
 
-  -- Constraints
-  CONSTRAINT valid_progress CHECK (curr_progress >= 0),
-  CONSTRAINT valid_performance_pct CHECK (performance_pct >= 0 AND performance_pct <= 100)
+  CONSTRAINT claim_boq_items_claim_item_unique UNIQUE (claim_id, item_no)
 );
 
-CREATE INDEX idx_claim_boq_items_claim_id ON claim_boq_items(claim_id);
-CREATE INDEX idx_claim_boq_items_template_item_id ON claim_boq_items(template_item_id);
+COMMENT ON TABLE claim_boq_items IS
+  'BOQ line items for a claim. Populated from contract_boq_templates on creation. '
+  'All computed fields (period_amount, after_perf, cumulative, requires_variation) '
+  'are set by the server action computeBOQRow() — never computed by the DB. '
+  'change_order_id: NULL = base contract item, non-NULL = CO-added item. '
+  'variation_override_*: director override path for unresolved variations.';
 
--- Claim staff line items
+COMMENT ON COLUMN claim_boq_items.prev_progress IS
+  'Sum of curr_progress from all previously APPROVED claims for this item. '
+  'Loaded by loadPrevProgress() when building a new claim template. '
+  'Not user-editable.';
+
+-- Note: change_order_id column and its COMMENT are added in migration 003.
+
+
+-- ── C6. claim_staff_items ─────────────────────────────────────────
+-- One row per staff position per claim.
+-- Staff always uses the days_prorated billing model.
+-- Formula: basic = (days/30) × rate; extra = (rate/192) × 1.5 × ot_hours
+
 CREATE TABLE claim_staff_items (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  claim_id UUID NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
-  template_item_id UUID NOT NULL REFERENCES contract_staff_templates(id),
+  id               UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  claim_id         UUID          NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  item_no          INTEGER       NOT NULL,
+  position         TEXT          NOT NULL,
+  position_ar      TEXT,
+  monthly_rate     NUMERIC(10,2) NOT NULL DEFAULT 0,
+  contract_months  INTEGER       DEFAULT 24, -- per-row — varies by position
 
-  -- Staff details
-  position_ar TEXT NOT NULL,
-  monthly_rate NUMERIC(12,2) NOT NULL CHECK (monthly_rate > 0),
-  working_days INTEGER NOT NULL CHECK (working_days > 0 AND working_days <= 30),
-  overtime_hours NUMERIC(8,2) DEFAULT 0 CHECK (overtime_hours >= 0),
+  -- User inputs
+  working_days     INTEGER       DEFAULT 0,          -- 0–31
+  overtime_hours   NUMERIC(6,2)  DEFAULT 0,          -- decimal ≥ 0
 
-  -- Calculated amounts
-  basic_amount NUMERIC(12,2) GENERATED ALWAYS AS (
-    (working_days / 30.0) * monthly_rate
-  ) STORED,
-  extra_amount NUMERIC(12,2) GENERATED ALWAYS AS (
-    (monthly_rate / 192.0) * 1.5 * overtime_hours
-  ) STORED,
-  total_amount NUMERIC(12,2) GENERATED ALWAYS AS (
-    ((working_days / 30.0) * monthly_rate) + ((monthly_rate / 192.0) * 1.5 * overtime_hours)
-  ) STORED,
+  -- Computed by server action (formula constants: 30 days/month, 192 hrs/month, 1.5× OT)
+  basic_amount     NUMERIC(15,2) DEFAULT 0,          -- (days/30) × rate
+  extra_amount     NUMERIC(15,2) DEFAULT 0,          -- (rate/192) × 1.5 × hours
+  total_amount     NUMERIC(15,2) DEFAULT 0,          -- basic + extra
+  performance_pct  NUMERIC(5,2)  DEFAULT 100,
+  after_perf       NUMERIC(15,2) DEFAULT 0,          -- total × (perf/100)
+  cumulative       NUMERIC(15,2) DEFAULT 0,          -- sum of after_perf across all approved claims
 
-  performance_pct NUMERIC(5,2) NOT NULL DEFAULT 100.00,
-  after_perf_amount NUMERIC(12,2) GENERATED ALWAYS AS (
-    (((working_days / 30.0) * monthly_rate) + ((monthly_rate / 192.0) * 1.5 * overtime_hours)) * performance_pct / 100.0
-  ) STORED,
+  -- change_order_id: added in migration 003 after change_orders table is created
 
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
 
-  -- Constraints
-  CONSTRAINT valid_performance_pct CHECK (performance_pct >= 0 AND performance_pct <= 100)
+  CONSTRAINT claim_staff_items_claim_item_unique UNIQUE (claim_id, item_no)
 );
 
-CREATE INDEX idx_claim_staff_items_claim_id ON claim_staff_items(claim_id);
-CREATE INDEX idx_claim_staff_items_template_item_id ON claim_staff_items(template_item_id);
+COMMENT ON TABLE claim_staff_items IS
+  'Staff/manpower line items for a claim. All computed fields set by server action. '
+  'Staff always uses days_prorated model — no progress_model column needed. '
+  'Formulas verified against real contract 231001101771 data.';
 
--- Claim workflow (status transition audit trail)
+
+-- ── C7. claim_workflow ────────────────────────────────────────────
+-- Full audit trail of all claim status transitions and actions.
+-- One row per action. Immutable after INSERT.
+
 CREATE TABLE claim_workflow (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  claim_id UUID NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
-  action TEXT NOT NULL,                 -- 'submit', 'approve', 'return', 'reject'
-  from_status claim_status,
-  to_status claim_status,
-  actor_id UUID NOT NULL REFERENCES profiles(id),
-  actor_role user_role NOT NULL,
-  return_reason TEXT,                   -- Mandatory if action = 'return'
-  notes TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-
-  -- Constraints
-  CONSTRAINT return_requires_reason CHECK (
-    action != 'return' OR return_reason IS NOT NULL
-  )
+  id           UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  claim_id     UUID         NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  action       TEXT         NOT NULL
+    CONSTRAINT claim_workflow_action_check
+    CHECK (action IN (
+      -- External user actions
+      'submit',              -- submits a draft claim
+      'resubmit',            -- resubmits after return
+      'comment',             -- informational note, no status change
+      -- Consultant review stage
+      'consultant_review',   -- moved to under_consultant_review
+      'consultant_return',   -- returned from consultant review
+      -- Admin review stage
+      'admin_review',        -- moved to under_admin_review (skipping consultant)
+      'admin_return',        -- admin returns to submitter
+      -- Director stage
+      'forward',             -- admin forwards to director
+      'approve',             -- director approves
+      'reject',              -- director rejects
+      'director_return',     -- director returns to admin
+      -- Lifecycle
+      'close',
+      'reopen'
+    )),
+  from_status  claim_status,
+  to_status    claim_status,
+  actor_id     UUID         NOT NULL REFERENCES profiles(id),
+  notes        TEXT,
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_claim_workflow_claim_id ON claim_workflow(claim_id);
-CREATE INDEX idx_claim_workflow_actor_id ON claim_workflow(actor_id);
-CREATE INDEX idx_claim_workflow_created_at ON claim_workflow(created_at);
+COMMENT ON TABLE claim_workflow IS
+  'Immutable audit trail of all claim state transitions. '
+  'Mirrors the shape of change_order_workflow for component reuse. '
+  'Every action is logged here — the timeline on the claim detail page reads from this table.';
 
--- ============================================================================
--- SECTION 4: CHANGE ORDER TABLES
--- ============================================================================
 
--- Change orders (BOQ/Staff modifications)
-CREATE TABLE change_orders (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  contract_id UUID NOT NULL REFERENCES contracts(id),
-  order_no TEXT NOT NULL,               -- Sequential per contract
-  type change_order_type NOT NULL,
-  status change_order_status NOT NULL DEFAULT 'draft',
-  description_ar TEXT NOT NULL,
-  description_en TEXT,
+-- ── C8. documents ─────────────────────────────────────────────────
+-- References to files uploaded to Supabase Storage.
+-- Each document belongs to exactly one parent (contract OR claim).
 
-  -- Financial impact (0 for duration extensions)
-  financial_impact NUMERIC(15,2) NOT NULL DEFAULT 0.00,
-
-  -- Cumulative tracking
-  cumulative_impact_pct NUMERIC(5,2),   -- Populated when approved
-
-  -- Audit
-  submitted_by UUID NOT NULL REFERENCES profiles(id),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-
-  -- Constraints
-  CONSTRAINT unique_order_no UNIQUE(contract_id, order_no)
-);
-
-CREATE INDEX idx_change_orders_contract_id ON change_orders(contract_id);
-CREATE INDEX idx_change_orders_status ON change_orders(status);
-CREATE INDEX idx_change_orders_type ON change_orders(type);
-
--- Change order BOQ items
-CREATE TABLE change_order_boq_items (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  change_order_id UUID NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
-  template_item_id UUID NOT NULL REFERENCES contract_boq_templates(id),
-  change_type TEXT NOT NULL CHECK (change_type IN ('addition', 'modification', 'deletion')),
-
-  -- For modifications/additions
-  original_qty NUMERIC(12,4),
-  new_qty NUMERIC(12,4),
-  unit_price NUMERIC(15,2),
-
-  -- Calculated impact
-  financial_impact NUMERIC(15,2) GENERATED ALWAYS AS (
-    CASE
-      WHEN change_type = 'addition' THEN new_qty * unit_price
-      WHEN change_type = 'modification' THEN (new_qty - original_qty) * unit_price
-      WHEN change_type = 'deletion' THEN -(original_qty * unit_price)
-      ELSE 0
-    END
-  ) STORED,
-
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_change_order_boq_items_change_order ON change_order_boq_items(change_order_id);
-
--- Change order workflow (approval trail)
-CREATE TABLE change_order_workflow (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  change_order_id UUID NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
-  action TEXT NOT NULL,
-  from_status change_order_status,
-  to_status change_order_status,
-  actor_id UUID NOT NULL REFERENCES profiles(id),
-  actor_role user_role NOT NULL,
-  return_reason TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-
-  CONSTRAINT return_requires_reason CHECK (
-    action != 'return' OR return_reason IS NOT NULL
-  )
-);
-
-CREATE INDEX idx_change_order_workflow_change_order ON change_order_workflow(change_order_id);
-CREATE INDEX idx_change_order_workflow_created_at ON change_order_workflow(created_at);
-
--- ============================================================================
--- SECTION 5: DOCUMENT & CERTIFICATE TABLES
--- ============================================================================
-
--- Document attachments
 CREATE TABLE documents (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  entity_type TEXT NOT NULL CHECK (entity_type IN ('claim', 'change_order')),
-  entity_id UUID NOT NULL,              -- claim_id or change_order_id
-  document_type document_type NOT NULL,
-  file_name TEXT NOT NULL,
-  file_path TEXT NOT NULL,              -- e.g., "documents/claim_abc/invoice.pdf"
-  storage_key TEXT NOT NULL,            -- For Supabase Storage deletion
-  file_size_bytes BIGINT,
-  uploaded_by UUID NOT NULL REFERENCES profiles(id),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
+  id            UUID           PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name          TEXT           NOT NULL,
+  original_name TEXT           NOT NULL,
+  file_path     TEXT           NOT NULL,              -- Supabase Storage path
+  file_size     BIGINT,
+  mime_type     TEXT,
+  type          document_type  NOT NULL DEFAULT 'other',
 
-  CONSTRAINT valid_entity CHECK (
-    (entity_type = 'claim' AND entity_id::text ~ '^[0-9a-f\-]{36}$') OR
-    (entity_type = 'change_order' AND entity_id::text ~ '^[0-9a-f\-]{36}$')
+  -- Exactly one parent — enforced by CHECK constraint
+  contract_id   UUID           REFERENCES contracts(id) ON DELETE CASCADE,
+  claim_id      UUID           REFERENCES claims(id)    ON DELETE CASCADE,
+
+  description   TEXT,
+  is_public     BOOLEAN        DEFAULT false,
+  uploaded_by   UUID           NOT NULL REFERENCES profiles(id),
+  created_at    TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT documents_has_exactly_one_parent CHECK (
+    (contract_id IS NOT NULL)::INT + (claim_id IS NOT NULL)::INT = 1
   )
 );
 
-CREATE INDEX idx_documents_entity ON documents(entity_type, entity_id);
-CREATE INDEX idx_documents_document_type ON documents(document_type);
-CREATE INDEX idx_documents_uploaded_by ON documents(uploaded_by);
+COMMENT ON TABLE documents IS
+  'References to files in Supabase Storage. '
+  'Each document belongs to exactly one parent (contract XOR claim). '
+  'file_path is the storage object path, e.g. claims/{claim_id}/{timestamp}_{name}.';
 
--- Generated certificates (auto-generated, immutable)
-CREATE TABLE generated_certificates (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  claim_id UUID NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
-  certificate_type certificate_type NOT NULL,
-  file_path TEXT NOT NULL,
-  storage_key TEXT NOT NULL,
-  generated_at TIMESTAMPTZ DEFAULT NOW(),
-  generated_by UUID NOT NULL REFERENCES profiles(id),
-  is_immutable BOOLEAN DEFAULT true,
 
-  CONSTRAINT immutable_certificates CHECK (is_immutable = true)
-);
+-- ── C9. audit_logs ────────────────────────────────────────────────
+-- System-wide immutable event log. Written by server actions.
+-- Not subject to user-facing RLS deletions.
 
-CREATE INDEX idx_generated_certificates_claim_id ON generated_certificates(claim_id);
-CREATE INDEX idx_generated_certificates_certificate_type ON generated_certificates(certificate_type);
-
--- ============================================================================
--- SECTION 6: AUDIT & NOTIFICATION TABLES
--- ============================================================================
-
--- Immutable audit log (INSERT ONLY)
 CREATE TABLE audit_logs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  table_name TEXT NOT NULL,
-  record_id UUID NOT NULL,
-  action TEXT NOT NULL CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),
-  actor_id UUID REFERENCES profiles(id),
-  actor_role user_role,
-  from_status TEXT,
-  to_status TEXT,
-  old_data JSONB,
-  new_data JSONB,
-  return_reason TEXT,
-  ip_address INET,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-
-  -- This table is INSERT-ONLY
-  -- No UPDATE or DELETE allowed (enforced by trigger)
-  CONSTRAINT audit_logs_insert_only CHECK (true)
+  id           UUID           PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_id     UUID           REFERENCES profiles(id),
+  actor_email  TEXT,
+  actor_role   user_role,
+  action       audit_action   NOT NULL,
+  entity_type  TEXT           NOT NULL,  -- 'claim' | 'contract' | 'user' | 'document'
+  entity_id    UUID,
+  entity_label TEXT,                     -- human-readable (e.g. 'مستخلص #7 — عقد 231001101771')
+  old_values   JSONB,
+  new_values   JSONB,
+  metadata     JSONB,
+  ip_address   INET,
+  user_agent   TEXT,
+  created_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_audit_logs_table_record ON audit_logs(table_name, record_id);
-CREATE INDEX idx_audit_logs_actor_id ON audit_logs(actor_id);
-CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
-CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+COMMENT ON TABLE audit_logs IS
+  'Immutable system-wide event log. Written by server actions. '
+  'Includes variation override approvals (director override model, migration 004).';
 
--- In-app notifications
+
+-- ── C10. notifications ────────────────────────────────────────────
+
 CREATE TABLE notifications (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  type notification_type NOT NULL,
-  title_ar TEXT NOT NULL,
-  body_ar TEXT NOT NULL,
-  entity_type TEXT CHECK (entity_type IN ('claim', 'change_order', NULL)),
-  entity_id UUID,
-  is_read BOOLEAN DEFAULT false,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  read_at TIMESTAMPTZ
+  id          UUID               PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id     UUID               NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  type        notification_type  NOT NULL,
+  title       TEXT               NOT NULL,
+  title_ar    TEXT,
+  body        TEXT,
+  body_ar     TEXT,
+  entity_type TEXT,
+  entity_id   UUID,
+  is_read     BOOLEAN            NOT NULL DEFAULT false,
+  read_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ        NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_notifications_user_id ON notifications(user_id);
-CREATE INDEX idx_notifications_is_read ON notifications(is_read) WHERE is_read = false;
-CREATE INDEX idx_notifications_created_at ON notifications(created_at);
 
--- KPI snapshots (periodic metrics capture)
+-- ── C11. kpi_snapshots ────────────────────────────────────────────
+-- Periodic snapshots of contract-level financial KPIs.
+-- Created by the KPI dashboard cron job or on demand.
+
 CREATE TABLE kpi_snapshots (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  contract_id UUID NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
-  snapshot_date DATE NOT NULL,
-  metric TEXT NOT NULL,                 -- e.g., 'total_approved_claims', 'remaining_budget'
-  value NUMERIC(15,2),
-  value_pct NUMERIC(5,2),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
+  id                UUID         PRIMARY KEY DEFAULT uuid_generate_v4(),
+  contract_id       UUID         NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+  snapshot_date     DATE         NOT NULL DEFAULT CURRENT_DATE,
+  total_paid        NUMERIC(15,2) DEFAULT 0,
+  total_retention   NUMERIC(15,2) DEFAULT 0,
+  completion_pct    NUMERIC(5,2)  DEFAULT 0,
+  claims_count      INTEGER       DEFAULT 0,
+  approved_claims   INTEGER       DEFAULT 0,
+  pending_claims    INTEGER       DEFAULT 0,
+  avg_review_days   NUMERIC(5,2),
+  avg_approval_days NUMERIC(5,2),
+  created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 
-  CONSTRAINT unique_snapshot UNIQUE(contract_id, snapshot_date, metric)
+  UNIQUE (contract_id, snapshot_date)
 );
 
-CREATE INDEX idx_kpi_snapshots_contract_id ON kpi_snapshots(contract_id);
-CREATE INDEX idx_kpi_snapshots_snapshot_date ON kpi_snapshots(snapshot_date);
 
--- ============================================================================
--- SECTION 7: HELPER FUNCTIONS
--- ============================================================================
+-- ─────────────────────────────────────────────────────────────────
+--  D. INDEXES
+-- ─────────────────────────────────────────────────────────────────
 
--- Check if current user is internal (director, reviewer, auditor)
+CREATE INDEX idx_profiles_role         ON profiles(role);
+CREATE INDEX idx_profiles_active       ON profiles(is_active);
+CREATE INDEX idx_contracts_status      ON contracts(status);
+CREATE INDEX idx_contracts_external    ON contracts(external_user_id);
+CREATE INDEX idx_claims_contract       ON claims(contract_id);
+CREATE INDEX idx_claims_status         ON claims(status);
+CREATE INDEX idx_claims_submitted_by   ON claims(submitted_by);
+CREATE INDEX idx_claims_type           ON claims(contract_id, claim_type);
+CREATE INDEX idx_claim_boq_claim       ON claim_boq_items(claim_id);
+CREATE INDEX idx_claim_staff_claim     ON claim_staff_items(claim_id);
+
+-- Partial index: only flagged variation rows (the common query target)
+CREATE INDEX idx_claim_boq_variation   ON claim_boq_items(claim_id, requires_variation)
+  WHERE requires_variation = TRUE;
+
+-- idx_claim_boq_co_id and idx_claim_staff_co_id created in migration 003
+-- after change_order_id FK columns are added to these tables.
+
+-- Partial index: non-NULL progress_model overrides
+CREATE INDEX idx_claim_boq_progress    ON claim_boq_items(progress_model)
+  WHERE progress_model IS NOT NULL;
+
+CREATE INDEX idx_claim_workflow_claim  ON claim_workflow(claim_id);
+CREATE INDEX idx_documents_contract    ON documents(contract_id);
+CREATE INDEX idx_documents_claim       ON documents(claim_id);
+CREATE INDEX idx_audit_actor           ON audit_logs(actor_id);
+CREATE INDEX idx_audit_entity          ON audit_logs(entity_type, entity_id);
+CREATE INDEX idx_audit_created         ON audit_logs(created_at DESC);
+CREATE INDEX idx_notifications_user    ON notifications(user_id, is_read);
+CREATE INDEX idx_notifications_created ON notifications(created_at DESC);
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  E. FUNCTIONS & TRIGGERS
+-- ─────────────────────────────────────────────────────────────────
+
+-- E1. Auto-update updated_at on any table that has the column
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_profiles_updated_at
+  BEFORE UPDATE ON profiles          FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER trg_contracts_updated_at
+  BEFORE UPDATE ON contracts         FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER trg_claims_updated_at
+  BEFORE UPDATE ON claims            FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+CREATE TRIGGER trg_amendments_updated_at
+  BEFORE UPDATE ON contract_amendments FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+
+-- E2. Auto-create profile on Supabase Auth user signup
+CREATE OR REPLACE FUNCTION handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, role)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
+    COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'contractor')
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+
+-- E3. Auto-number claims sequentially per contract
+-- If claim_no is not provided (NULL or 0), assign MAX(claim_no)+1 for this contract.
+-- This is safe for concurrent inserts because MAX() within a transaction
+-- reads uncommitted rows from the same session.
+CREATE OR REPLACE FUNCTION auto_claim_number()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.claim_no IS NULL OR NEW.claim_no = 0 THEN
+    SELECT COALESCE(MAX(claim_no), 0) + 1
+    INTO   NEW.claim_no
+    FROM   claims
+    WHERE  contract_id = NEW.contract_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_auto_claim_number
+  BEFORE INSERT ON claims
+  FOR EACH ROW EXECUTE FUNCTION auto_claim_number();
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  F. ROW LEVEL SECURITY (RLS)
+-- ─────────────────────────────────────────────────────────────────
+
+-- Enable RLS on all application tables
+ALTER TABLE profiles             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contracts            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contract_amendments  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE claims               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE claim_boq_items      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE claim_staff_items    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE claim_workflow       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kpi_snapshots        ENABLE ROW LEVEL SECURITY;
+
+
+-- Helper functions (SECURITY DEFINER — execute with elevated privileges)
+
+CREATE OR REPLACE FUNCTION auth_role()
+RETURNS user_role AS $$
+  SELECT role FROM profiles WHERE id = auth.uid();
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
 CREATE OR REPLACE FUNCTION is_internal()
 RETURNS BOOLEAN AS $$
-BEGIN
-  RETURN (SELECT role FROM profiles WHERE id = auth.uid())
-    IN ('director', 'reviewer', 'auditor');
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
-
--- Get user role
-CREATE OR REPLACE FUNCTION get_user_role()
-RETURNS user_role AS $$
-BEGIN
-  RETURN (SELECT role FROM profiles WHERE id = auth.uid());
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
-
--- Get contracts accessible to current user
-CREATE OR REPLACE FUNCTION get_user_contracts()
-RETURNS UUID[] AS $$
-DECLARE
-  v_role user_role;
-  v_user_id UUID;
-BEGIN
-  v_user_id := auth.uid();
-  v_role := get_user_role();
-
-  RETURN CASE v_role
-    WHEN 'director'::user_role THEN
-      -- Directors see all contracts
-      (SELECT ARRAY_AGG(id) FROM contracts)
-    WHEN 'reviewer'::user_role OR 'auditor'::user_role THEN
-      -- Reviewers and auditors see all contracts
-      (SELECT ARRAY_AGG(id) FROM contracts)
-    WHEN 'supervisor'::user_role THEN
-      -- Supervisors see contracts they're assigned to
-      (SELECT ARRAY_AGG(DISTINCT contract_id) FROM contract_assignments
-       WHERE user_id = v_user_id AND role = 'supervisor')
-    WHEN 'contractor'::user_role THEN
-      -- Contractors see contracts where they've submitted claims
-      (SELECT ARRAY_AGG(DISTINCT contract_id) FROM claims
-       WHERE submitted_by = v_user_id)
-    ELSE ARRAY[]::UUID[]
-  END;
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
-
--- Calculate cumulative change order impact for a contract
-CREATE OR REPLACE FUNCTION get_change_order_cumulative_pct(p_contract_id UUID)
-RETURNS NUMERIC AS $$
-DECLARE
-  v_total_impact NUMERIC;
-  v_base_value NUMERIC;
-  v_cumulative_pct NUMERIC;
-BEGIN
-  SELECT base_value INTO v_base_value FROM contracts WHERE id = p_contract_id;
-
-  SELECT COALESCE(SUM(financial_impact), 0) INTO v_total_impact
-  FROM change_orders
-  WHERE contract_id = p_contract_id
-    AND status = 'approved';
-
-  IF v_base_value = 0 THEN
-    RETURN 0;
-  END IF;
-
-  v_cumulative_pct := (v_total_impact / v_base_value) * 100;
-  RETURN LEAST(v_cumulative_pct, 100);
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
-
--- ============================================================================
--- SECTION 8: TRIGGER FUNCTIONS
--- ============================================================================
-
--- Prevent updates to approved/rejected claims
-CREATE OR REPLACE FUNCTION fn_prevent_approved_claim_edit()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF OLD.status IN ('approved', 'rejected') AND TG_OP = 'UPDATE' THEN
-    IF NEW.status = OLD.status THEN
-      RAISE EXCEPTION 'Cannot modify an approved or rejected claim (Immutable)';
-    END IF;
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Set supervisor review timestamp when status changes to under_supervisor_review
-CREATE OR REPLACE FUNCTION fn_set_supervisor_review_timestamp()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF NEW.status = 'under_supervisor_review'::claim_status AND
-     OLD.status != 'under_supervisor_review'::claim_status THEN
-    NEW.supervisor_review_started_at := NOW();
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Validate and prevent approval of change order if 10% limit exceeded
-CREATE OR REPLACE FUNCTION fn_check_change_order_limit()
-RETURNS TRIGGER AS $$
-DECLARE
-  v_contract_base NUMERIC;
-  v_cumulative_impact NUMERIC;
-  v_current_impact NUMERIC;
-  v_total_impact NUMERIC;
-  v_cumulative_pct NUMERIC;
-BEGIN
-  -- Only validate when approving
-  IF NEW.status = 'approved'::change_order_status AND
-     OLD.status != 'approved'::change_order_status THEN
-
-    -- Get contract base value
-    SELECT base_value INTO v_contract_base FROM contracts WHERE id = NEW.contract_id;
-
-    -- Calculate cumulative impact of already-approved change orders
-    SELECT COALESCE(SUM(financial_impact), 0) INTO v_cumulative_impact
-    FROM change_orders
-    WHERE contract_id = NEW.contract_id
-      AND status = 'approved'
-      AND id != NEW.id;
-
-    -- Add current change order impact
-    v_current_impact := COALESCE(NEW.financial_impact, 0);
-    v_total_impact := v_cumulative_impact + v_current_impact;
-
-    -- Calculate percentage
-    v_cumulative_pct := (v_total_impact / v_contract_base) * 100;
-
-    -- Check hard limit (10% = no exceptions)
-    IF v_cumulative_pct > 10.0 THEN
-      RAISE EXCEPTION 'Change order exceeds 10%% cumulative limit. Current: %.2f%%, Total would be: %.2f%%',
-        (v_cumulative_impact / v_contract_base) * 100,
-        v_cumulative_pct;
-    END IF;
-
-    -- Store cumulative percentage for reference
-    NEW.cumulative_impact_pct := v_cumulative_pct;
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Update contract BOQ templates when change order is approved
-CREATE OR REPLACE FUNCTION fn_update_contract_boq_after_change_order()
-RETURNS TRIGGER AS $$
-DECLARE
-  v_boq_item_id UUID;
-  v_new_qty NUMERIC;
-  v_change_type TEXT;
-BEGIN
-  -- Only process when change order is approved
-  IF NEW.status = 'approved'::change_order_status AND
-     OLD.status != 'approved'::change_order_status THEN
-
-    -- Update each BOQ item referenced in this change order
-    FOR v_boq_item_id, v_new_qty, v_change_type IN
-      SELECT template_item_id, new_qty, change_type
-      FROM change_order_boq_items
-      WHERE change_order_id = NEW.id
-    LOOP
-      IF v_change_type = 'modification' THEN
-        UPDATE contract_boq_templates
-        SET contractual_qty = v_new_qty,
-            updated_at = NOW()
-        WHERE id = v_boq_item_id;
-      ELSIF v_change_type = 'deletion' THEN
-        -- Soft delete (set qty to 0)
-        UPDATE contract_boq_templates
-        SET contractual_qty = 0,
-            updated_at = NOW()
-        WHERE id = v_boq_item_id;
-      ELSIF v_change_type = 'addition' THEN
-        -- New items already created; update quantity if needed
-        UPDATE contract_boq_templates
-        SET contractual_qty = v_new_qty,
-            updated_at = NOW()
-        WHERE id = v_boq_item_id;
-      END IF;
-    END LOOP;
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Generic audit logging function (logs all changes)
-CREATE OR REPLACE FUNCTION fn_audit_log()
-RETURNS TRIGGER AS $$
-DECLARE
-  v_actor_id UUID;
-  v_actor_role user_role;
-  v_from_status TEXT;
-  v_to_status TEXT;
-BEGIN
-  v_actor_id := auth.uid();
-
-  -- Get actor role if exists
-  IF v_actor_id IS NOT NULL THEN
-    SELECT role INTO v_actor_role FROM profiles WHERE id = v_actor_id;
-  END IF;
-
-  -- Extract status for claims/change_orders
-  IF TG_TABLE_NAME IN ('claims', 'change_orders') THEN
-    IF TG_OP = 'UPDATE' THEN
-      v_from_status := OLD.status::TEXT;
-      v_to_status := NEW.status::TEXT;
-    END IF;
-  END IF;
-
-  -- Insert audit log
-  INSERT INTO audit_logs (
-    table_name, record_id, action, actor_id, actor_role,
-    from_status, to_status, old_data, new_data, ip_address, created_at
-  ) VALUES (
-    TG_TABLE_NAME,
-    CASE TG_OP
-      WHEN 'DELETE' THEN OLD.id
-      ELSE NEW.id
-    END,
-    TG_OP,
-    v_actor_id,
-    v_actor_role,
-    v_from_status,
-    v_to_status,
-    CASE TG_OP WHEN 'DELETE' OR 'UPDATE' THEN row_to_json(OLD) ELSE NULL END,
-    CASE TG_OP WHEN 'INSERT' OR 'UPDATE' THEN row_to_json(NEW) ELSE NULL END,
-    inet_client_addr(),
-    NOW()
+  SELECT COALESCE(
+    (SELECT role IN ('director','admin','reviewer') FROM profiles WHERE id = auth.uid()),
+    false
   );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
 
-  RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
-END;
-$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION is_external()
+RETURNS BOOLEAN AS $$
+  SELECT COALESCE(
+    (SELECT role IN ('consultant','contractor') FROM profiles WHERE id = auth.uid()),
+    false
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
 
--- Prevent UPDATE/DELETE on audit_logs table
-CREATE OR REPLACE FUNCTION fn_prevent_audit_log_modification()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF TG_OP = 'UPDATE' OR TG_OP = 'DELETE' THEN
-    RAISE EXCEPTION 'audit_logs table is INSERT-ONLY. Cannot perform %', TG_OP;
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
 
--- ============================================================================
--- SECTION 9: TRIGGER ATTACHMENTS
--- ============================================================================
+-- ── profiles ──────────────────────────────────────────────────────
+-- Own row + internal users can read all. Admin can manage all.
 
--- Claim audit trail
-CREATE TRIGGER tr_audit_claims
-  AFTER INSERT OR UPDATE OR DELETE ON claims
-  FOR EACH ROW EXECUTE FUNCTION fn_audit_log();
-
--- Claim immutability protection
-CREATE TRIGGER tr_prevent_approved_claim_edit
-  BEFORE UPDATE ON claims
-  FOR EACH ROW EXECUTE FUNCTION fn_prevent_approved_claim_edit();
-
--- Supervisor review timestamp
-CREATE TRIGGER tr_set_supervisor_review_timestamp
-  BEFORE UPDATE ON claims
-  FOR EACH ROW EXECUTE FUNCTION fn_set_supervisor_review_timestamp();
-
--- Change order limit validation
-CREATE TRIGGER tr_check_change_order_limit
-  BEFORE INSERT OR UPDATE ON change_orders
-  FOR EACH ROW EXECUTE FUNCTION fn_check_change_order_limit();
-
--- Change order BOQ update
-CREATE TRIGGER tr_update_contract_boq_after_change_order
-  AFTER UPDATE ON change_orders
-  FOR EACH ROW EXECUTE FUNCTION fn_update_contract_boq_after_change_order();
-
--- Change order audit trail
-CREATE TRIGGER tr_audit_change_orders
-  AFTER INSERT OR UPDATE OR DELETE ON change_orders
-  FOR EACH ROW EXECUTE FUNCTION fn_audit_log();
-
--- Claim workflow audit
-CREATE TRIGGER tr_audit_claim_workflow
-  AFTER INSERT OR UPDATE OR DELETE ON claim_workflow
-  FOR EACH ROW EXECUTE FUNCTION fn_audit_log();
-
--- Change order workflow audit
-CREATE TRIGGER tr_audit_change_order_workflow
-  AFTER INSERT OR UPDATE OR DELETE ON change_order_workflow
-  FOR EACH ROW EXECUTE FUNCTION fn_audit_log();
-
--- Audit log immutability (prevent updates/deletes)
-CREATE TRIGGER tr_prevent_audit_log_modification
-  BEFORE UPDATE OR DELETE ON audit_logs
-  FOR EACH ROW EXECUTE FUNCTION fn_prevent_audit_log_modification();
-
--- ============================================================================
--- SECTION 10: ROW LEVEL SECURITY (RLS) POLICIES
--- ============================================================================
-
--- Enable RLS on all tables
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE contracts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE contract_assignments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE contract_boq_templates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE contract_staff_templates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE claims ENABLE ROW LEVEL SECURITY;
-ALTER TABLE claim_boq_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE claim_staff_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE claim_workflow ENABLE ROW LEVEL SECURITY;
-ALTER TABLE change_orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE change_order_boq_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE change_order_workflow ENABLE ROW LEVEL SECURITY;
-ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
-ALTER TABLE generated_certificates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE kpi_snapshots ENABLE ROW LEVEL SECURITY;
-
--- PROFILES: Users can read own profile; internal users can read all
-CREATE POLICY "profiles_self_select"
+CREATE POLICY "profiles_select_own_or_internal"
   ON profiles FOR SELECT
-  USING (auth.uid() = id);
+  USING (id = auth.uid() OR is_internal());
 
-CREATE POLICY "profiles_internal_select"
-  ON profiles FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.role IN ('director', 'reviewer', 'auditor')
-    )
-  );
+CREATE POLICY "profiles_update_own"
+  ON profiles FOR UPDATE
+  USING (id = auth.uid())
+  WITH CHECK (id = auth.uid());
 
--- CONTRACTS: Director/Reviewer/Auditor see all; Supervisor sees assigned; Contractor sees own
-CREATE POLICY "contracts_internal_select"
+CREATE POLICY "profiles_admin_all"
+  ON profiles FOR ALL
+  USING (auth_role() IN ('director', 'admin'));
+
+
+-- ── contracts ─────────────────────────────────────────────────────
+
+CREATE POLICY "contracts_internal_all"
+  ON contracts FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "contracts_external_select_own"
   ON contracts FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('director', 'reviewer', 'auditor')
-    )
-  );
+  USING (external_user_id = auth.uid());
 
-CREATE POLICY "contracts_supervisor_select"
-  ON contracts FOR SELECT
-  USING (
-    (SELECT role FROM profiles WHERE id = auth.uid()) = 'supervisor'::user_role
-    AND EXISTS (
-      SELECT 1 FROM contract_assignments
-      WHERE contract_id = contracts.id
-        AND user_id = auth.uid()
-        AND role = 'supervisor'::user_role
-    )
-  );
 
-CREATE POLICY "contracts_contractor_select"
-  ON contracts FOR SELECT
-  USING (
-    (SELECT role FROM profiles WHERE id = auth.uid()) = 'contractor'::user_role
-    AND EXISTS (
-      SELECT 1 FROM claims WHERE contract_id = contracts.id AND submitted_by = auth.uid()
-    )
-  );
+-- ── claims ────────────────────────────────────────────────────────
 
--- CONTRACT_ASSIGNMENTS
-CREATE POLICY "contract_assignments_internal_all"
-  ON contract_assignments FOR ALL
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('director', 'reviewer', 'auditor')
-    )
-  );
+CREATE POLICY "claims_internal_all"
+  ON claims FOR ALL
+  USING (is_internal());
 
-CREATE POLICY "contract_assignments_user_select"
-  ON contract_assignments FOR SELECT
-  USING (user_id = auth.uid());
-
--- CONTRACT BOQ TEMPLATES: Same visibility as contracts
-CREATE POLICY "contract_boq_templates_view"
-  ON contract_boq_templates FOR SELECT
-  USING (
-    contract_id IN (SELECT id FROM contracts WHERE true)  -- Inherits from contracts RLS
-  );
-
-CREATE POLICY "contract_boq_templates_edit"
-  ON contract_boq_templates FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'director'::user_role
-    )
-  );
-
--- CONTRACT STAFF TEMPLATES: Same visibility as contracts
-CREATE POLICY "contract_staff_templates_view"
-  ON contract_staff_templates FOR SELECT
-  USING (
-    contract_id IN (SELECT id FROM contracts WHERE true)
-  );
-
-CREATE POLICY "contract_staff_templates_edit"
-  ON contract_staff_templates FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'director'::user_role
-    )
-  );
-
--- CLAIMS: Director/Reviewer/Auditor see all; Supervisor sees own contracts; Contractor sees own
-CREATE POLICY "claims_internal_select"
+CREATE POLICY "claims_external_select"
   ON claims FOR SELECT
   USING (
-    EXISTS (
-      SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('director', 'reviewer', 'auditor')
+    submitted_by = auth.uid()
+    OR created_by = auth.uid()
+    OR contract_id IN (
+      SELECT id FROM contracts WHERE external_user_id = auth.uid()
     )
   );
 
-CREATE POLICY "claims_supervisor_select"
-  ON claims FOR SELECT
-  USING (
-    (SELECT role FROM profiles WHERE id = auth.uid()) = 'supervisor'::user_role
-    AND contract_id IN (
-      SELECT contract_id FROM contract_assignments
-      WHERE user_id = auth.uid() AND role = 'supervisor'::user_role
-    )
-  );
-
-CREATE POLICY "claims_contractor_select"
-  ON claims FOR SELECT
-  USING (submitted_by = auth.uid());
-
-CREATE POLICY "claims_contractor_insert"
+CREATE POLICY "claims_external_insert"
   ON claims FOR INSERT
   WITH CHECK (
-    (SELECT role FROM profiles WHERE id = auth.uid()) = 'contractor'::user_role
-    AND submitted_by = auth.uid()
+    contract_id IN (
+      SELECT id FROM contracts
+      WHERE  external_user_id = auth.uid()
+        AND  status = 'active'
+    )
+    AND status = 'draft'
+    AND created_by = auth.uid()
   );
 
-CREATE POLICY "claims_contractor_update_draft"
+-- External users can update their own claims when in an editable state.
+-- With CHECK prevents setting status to anything other than these states
+-- (status transitions to submitted/approved are done via server actions with
+-- service role client, which bypasses RLS).
+CREATE POLICY "claims_external_update_editable"
   ON claims FOR UPDATE
   USING (
-    status = 'draft'::claim_status AND submitted_by = auth.uid()
+    (created_by = auth.uid() OR submitted_by = auth.uid())
+    AND status IN ('draft', 'returned_by_consultant', 'returned_by_admin')
+  )
+  WITH CHECK (
+    (created_by = auth.uid() OR submitted_by = auth.uid())
+    AND status IN ('draft', 'returned_by_consultant', 'returned_by_admin', 'submitted')
   );
 
--- CLAIM BOQ ITEMS: Follow claims visibility
-CREATE POLICY "claim_boq_items_view"
+
+-- ── claim_boq_items ───────────────────────────────────────────────
+-- Internal: full access.
+-- External: split into explicit per-operation policies.
+-- NOTE: change_order_id IS NULL guard added in migration 003
+-- after the change_order_id FK column is added.
+
+CREATE POLICY "claim_boq_internal_all"
+  ON claim_boq_items FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "claim_boq_external_select"
   ON claim_boq_items FOR SELECT
   USING (
-    claim_id IN (SELECT id FROM claims WHERE true)  -- Inherits from claims RLS
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
   );
 
--- CLAIM STAFF ITEMS: Follow claims visibility
-CREATE POLICY "claim_staff_items_view"
+-- claim_boq_external_insert: upgraded in 003 to add change_order_id IS NULL guard
+-- (column added in 003; guard cannot exist in 001)
+CREATE POLICY "claim_boq_external_insert"
+  ON claim_boq_items FOR INSERT
+  WITH CHECK (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "claim_boq_external_update"
+  ON claim_boq_items FOR UPDATE
+  USING (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  )
+  WITH CHECK (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+    -- change_order_id IS NULL guard added in migration 003
+  );
+
+CREATE POLICY "claim_boq_external_delete"
+  ON claim_boq_items FOR DELETE
+  USING (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  );
+
+
+-- ── claim_staff_items ─────────────────────────────────────────────
+
+CREATE POLICY "claim_staff_internal_all"
+  ON claim_staff_items FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "claim_staff_external_select"
   ON claim_staff_items FOR SELECT
   USING (
-    claim_id IN (SELECT id FROM claims WHERE true)
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
   );
 
--- CLAIM WORKFLOW: Follow claims visibility
-CREATE POLICY "claim_workflow_view"
+-- claim_staff_external_insert: upgraded in 003 to add change_order_id IS NULL guard
+CREATE POLICY "claim_staff_external_insert"
+  ON claim_staff_items FOR INSERT
+  WITH CHECK (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "claim_staff_external_update"
+  ON claim_staff_items FOR UPDATE
+  USING (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  )
+  WITH CHECK (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+    -- change_order_id IS NULL guard added in migration 003
+  );
+
+CREATE POLICY "claim_staff_external_delete"
+  ON claim_staff_items FOR DELETE
+  USING (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  );
+
+
+-- ── claim_workflow ────────────────────────────────────────────────
+
+CREATE POLICY "workflow_internal_all"
+  ON claim_workflow FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "workflow_external_select"
   ON claim_workflow FOR SELECT
   USING (
-    claim_id IN (SELECT id FROM claims WHERE true)
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
   );
 
-CREATE POLICY "claim_workflow_insert"
+-- External users may only insert submit/resubmit/comment entries for their own claims.
+-- Internal workflow entries (review/forward/approve/reject) are written
+-- via service role client in server actions, bypassing RLS.
+CREATE POLICY "workflow_external_insert"
   ON claim_workflow FOR INSERT
   WITH CHECK (
-    claim_id IN (SELECT id FROM claims WHERE true)
-  );
-
--- CHANGE ORDERS: Same visibility as contracts
-CREATE POLICY "change_orders_internal_select"
-  ON change_orders FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('director', 'reviewer', 'auditor')
+    actor_id = auth.uid()
+    AND action IN ('submit', 'resubmit', 'comment')
+    AND claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
     )
   );
 
-CREATE POLICY "change_orders_supervisor_select"
-  ON change_orders FOR SELECT
-  USING (
-    (SELECT role FROM profiles WHERE id = auth.uid()) = 'supervisor'::user_role
-    AND contract_id IN (
-      SELECT contract_id FROM contract_assignments
-      WHERE user_id = auth.uid() AND role = 'supervisor'::user_role
-    )
-  );
 
--- CHANGE ORDER BOQ ITEMS
-CREATE POLICY "change_order_boq_items_view"
-  ON change_order_boq_items FOR SELECT
-  USING (
-    change_order_id IN (SELECT id FROM change_orders WHERE true)
-  );
+-- ── documents ─────────────────────────────────────────────────────
 
--- CHANGE ORDER WORKFLOW
-CREATE POLICY "change_order_workflow_view"
-  ON change_order_workflow FOR SELECT
-  USING (
-    change_order_id IN (SELECT id FROM change_orders WHERE true)
-  );
+CREATE POLICY "documents_internal_all"
+  ON documents FOR ALL
+  USING (is_internal());
 
--- DOCUMENTS: Users see documents for claims/change orders they can access
-CREATE POLICY "documents_view"
+CREATE POLICY "documents_external_select"
   ON documents FOR SELECT
   USING (
-    (entity_type = 'claim' AND entity_id IN (SELECT id FROM claims WHERE true))
-    OR (entity_type = 'change_order' AND entity_id IN (SELECT id FROM change_orders WHERE true))
+    uploaded_by = auth.uid()
+    OR claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+    OR contract_id IN (
+      SELECT id FROM contracts WHERE external_user_id = auth.uid()
+    )
   );
 
-CREATE POLICY "documents_insert"
+CREATE POLICY "documents_external_insert"
   ON documents FOR INSERT
   WITH CHECK (
-    (entity_type = 'claim' AND entity_id IN (SELECT id FROM claims WHERE submitted_by = auth.uid()))
-    OR (entity_type = 'change_order' AND uploaded_by = auth.uid())
+    uploaded_by = auth.uid()
+    AND (
+      claim_id IN (
+        SELECT c.id FROM claims c
+        JOIN contracts ct ON c.contract_id = ct.id
+        WHERE ct.external_user_id = auth.uid()
+      )
+      OR contract_id IN (
+        SELECT id FROM contracts WHERE external_user_id = auth.uid()
+      )
+    )
   );
 
--- GENERATED CERTIFICATES: Follow claims visibility
-CREATE POLICY "generated_certificates_view"
-  ON generated_certificates FOR SELECT
-  USING (
-    claim_id IN (SELECT id FROM claims WHERE true)
-  );
+-- External users can only delete their own uploads (not others')
+CREATE POLICY "documents_external_delete"
+  ON documents FOR DELETE
+  USING (uploaded_by = auth.uid());
 
--- AUDIT LOGS: Director and Reviewer only
-CREATE POLICY "audit_logs_director_reviewer_select"
+
+-- ── audit_logs ────────────────────────────────────────────────────
+-- Read only. Written exclusively by server actions.
+
+CREATE POLICY "audit_director_admin_all"
   ON audit_logs FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('director', 'reviewer')
-    )
-  );
+  USING (auth_role() IN ('director', 'admin'));
 
--- NOTIFICATIONS: Each user sees own notifications
-CREATE POLICY "notifications_self_select"
-  ON notifications FOR SELECT
+CREATE POLICY "audit_own_actions"
+  ON audit_logs FOR SELECT
+  USING (actor_id = auth.uid());
+
+
+-- ── notifications ─────────────────────────────────────────────────
+
+CREATE POLICY "notifications_own_all"
+  ON notifications FOR ALL
   USING (user_id = auth.uid());
 
-CREATE POLICY "notifications_self_update"
-  ON notifications FOR UPDATE
-  USING (user_id = auth.uid());
 
-CREATE POLICY "notifications_self_delete"
-  ON notifications FOR DELETE
-  USING (user_id = auth.uid());
+-- ── kpi_snapshots ─────────────────────────────────────────────────
 
--- KPI SNAPSHOTS: Internal users and authorized supervisors
-CREATE POLICY "kpi_snapshots_internal_select"
+CREATE POLICY "kpi_internal_all"
+  ON kpi_snapshots FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "kpi_external_own"
   ON kpi_snapshots FOR SELECT
   USING (
-    EXISTS (
-      SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('director', 'reviewer', 'auditor')
+    contract_id IN (
+      SELECT id FROM contracts WHERE external_user_id = auth.uid()
     )
   );
 
-CREATE POLICY "kpi_snapshots_supervisor_select"
-  ON kpi_snapshots FOR SELECT
-  USING (
-    (SELECT role FROM profiles WHERE id = auth.uid()) = 'supervisor'::user_role
-    AND contract_id IN (
-      SELECT contract_id FROM contract_assignments
-      WHERE user_id = auth.uid() AND role = 'supervisor'::user_role
+
+-- ─────────────────────────────────────────────────────────────────
+--  G. VIEWS
+-- ─────────────────────────────────────────────────────────────────
+
+-- G1. claims_full — claims with joined context for the list and detail pages
+CREATE OR REPLACE VIEW claims_full AS
+SELECT
+  cl.*,
+  ct.contract_no,
+  ct.title         AS contract_title,
+  ct.title_ar      AS contract_title_ar,
+  ct.party_name,
+  ct.base_value    AS contract_value,
+  p_sub.full_name  AS submitted_by_name,
+  p_rev.full_name  AS reviewed_by_name,
+  p_apr.full_name  AS approved_by_name,
+  (SELECT COUNT(*) FROM documents   d  WHERE d.claim_id  = cl.id) AS doc_count,
+  (SELECT COUNT(*) FROM claim_workflow wf WHERE wf.claim_id = cl.id) AS workflow_steps
+FROM  claims cl
+JOIN  contracts ct    ON cl.contract_id  = ct.id
+LEFT JOIN profiles p_sub ON cl.submitted_by = p_sub.id
+LEFT JOIN profiles p_rev ON cl.reviewed_by  = p_rev.id
+LEFT JOIN profiles p_apr ON cl.approved_by  = p_apr.id;
+
+COMMENT ON VIEW claims_full IS
+  'Claims with contract context and people names pre-joined. '
+  'Used by the claims list page and claim detail page. '
+  'Subject to RLS on the underlying claims table.';
+
+
+-- G2. contracts_summary — contract list with aggregated claim financials
+CREATE OR REPLACE VIEW contracts_summary AS
+SELECT
+  ct.*,
+  COUNT(DISTINCT cl.id)                                                     AS total_claims,
+  COUNT(DISTINCT cl.id) FILTER (WHERE cl.status = 'approved')               AS approved_claims,
+  COUNT(DISTINCT cl.id) FILTER (
+    WHERE cl.status NOT IN ('draft','approved','rejected','closed')
+  )                                                                         AS pending_claims,
+  COALESCE(SUM(cl.total_amount)     FILTER (WHERE cl.status = 'approved'), 0) AS total_paid,
+  COALESCE(SUM(cl.retention_amount) FILTER (WHERE cl.status = 'approved'), 0) AS total_retention,
+  CASE WHEN ct.base_value > 0
+    THEN ROUND(
+      COALESCE(SUM(cl.gross_amount) FILTER (WHERE cl.status = 'approved'), 0)
+      / ct.base_value * 100,
+      2
     )
-  );
+    ELSE 0
+  END                                                                       AS completion_pct,
+  p_ext.full_name AS external_user_name,
+  p_dir.full_name AS director_name,
+  p_adm.full_name AS admin_name
+FROM  contracts ct
+LEFT JOIN claims    cl    ON cl.contract_id      = ct.id
+LEFT JOIN profiles  p_ext ON ct.external_user_id = p_ext.id
+LEFT JOIN profiles  p_dir ON ct.director_id      = p_dir.id
+LEFT JOIN profiles  p_adm ON ct.admin_id         = p_adm.id
+GROUP BY ct.id, p_ext.full_name, p_dir.full_name, p_adm.full_name;
 
--- ============================================================================
--- SECTION 11: GRANTS FOR SUPABASE ROLES
--- ============================================================================
+COMMENT ON VIEW contracts_summary IS
+  'Contracts with aggregated claim counts and financial totals. '
+  'Used by the contracts list page and dashboard KPI section.';
 
--- Grant execute on helper functions to authenticated users
-GRANT EXECUTE ON FUNCTION is_internal() TO authenticated;
-GRANT EXECUTE ON FUNCTION get_user_role() TO authenticated;
-GRANT EXECUTE ON FUNCTION get_user_contracts() TO authenticated;
-GRANT EXECUTE ON FUNCTION get_change_order_cumulative_pct(UUID) TO authenticated;
 
--- Grant execute on trigger functions (internal use only)
-GRANT EXECUTE ON FUNCTION fn_prevent_approved_claim_edit() TO authenticated;
-GRANT EXECUTE ON FUNCTION fn_set_supervisor_review_timestamp() TO authenticated;
-GRANT EXECUTE ON FUNCTION fn_check_change_order_limit() TO authenticated;
-GRANT EXECUTE ON FUNCTION fn_update_contract_boq_after_change_order() TO authenticated;
-GRANT EXECUTE ON FUNCTION fn_audit_log() TO authenticated;
-GRANT EXECUTE ON FUNCTION fn_prevent_audit_log_modification() TO authenticated;
-
--- Grant table access based on RLS
-GRANT SELECT ON profiles TO authenticated;
-GRANT SELECT, INSERT, UPDATE ON contracts TO authenticated;
-GRANT SELECT ON contract_assignments TO authenticated;
-GRANT SELECT ON contract_boq_templates TO authenticated;
-GRANT SELECT ON contract_staff_templates TO authenticated;
-GRANT SELECT, INSERT, UPDATE ON claims TO authenticated;
-GRANT SELECT, INSERT ON claim_boq_items TO authenticated;
-GRANT SELECT, INSERT ON claim_staff_items TO authenticated;
-GRANT SELECT, INSERT ON claim_workflow TO authenticated;
-GRANT SELECT, INSERT, UPDATE ON change_orders TO authenticated;
-GRANT SELECT, INSERT ON change_order_boq_items TO authenticated;
-GRANT SELECT, INSERT ON change_order_workflow TO authenticated;
-GRANT SELECT, INSERT ON documents TO authenticated;
-GRANT SELECT, INSERT ON generated_certificates TO authenticated;
-GRANT SELECT ON audit_logs TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON notifications TO authenticated;
-GRANT SELECT ON kpi_snapshots TO authenticated;
-
--- ============================================================================
--- SECTION 12: INDEXES FOR PERFORMANCE
--- ============================================================================
-
--- Frequently searched columns
-CREATE INDEX idx_claims_contract_status ON claims(contract_id, status);
-CREATE INDEX idx_claims_submitted_at ON claims(submitted_at DESC NULLS LAST);
-CREATE INDEX idx_change_orders_contract_status ON change_orders(contract_id, status);
-CREATE INDEX idx_documents_entity_type ON documents(entity_type, entity_id);
-CREATE INDEX idx_audit_logs_created_at_desc ON audit_logs(created_at DESC);
-
--- Text search indexes (future full-text search support)
-CREATE INDEX idx_contracts_search ON contracts USING GIN (
-  to_tsvector('english', contract_no || ' ' || COALESCE(title_en, ''))
-);
-
--- ============================================================================
--- SECTION 13: COMMENTS & DOCUMENTATION
--- ============================================================================
-
-COMMENT ON TABLE profiles IS 'User profiles linked to Supabase auth.users. Role determines access level.';
-COMMENT ON TABLE contracts IS 'Contract registry with financial terms, timeline, and project details.';
-COMMENT ON TABLE claims IS 'Payment claims submitted by contractors for work performed. Supports BOQ and Staff items.';
-COMMENT ON TABLE claim_workflow IS 'Audit trail for claim status transitions through 5-stage approval workflow.';
-COMMENT ON TABLE change_orders IS 'Contract modifications with hard 10%% cumulative limit enforcement.';
-COMMENT ON TABLE audit_logs IS 'Immutable INSERT-ONLY audit trail of all system changes.';
-COMMENT ON TABLE documents IS 'File attachments (invoices, technical reports, certificates) for claims and change orders.';
-COMMENT ON TABLE notifications IS 'In-app notifications for users on claim/change order events.';
-
-COMMENT ON FUNCTION is_internal() IS 'Returns true if current user is director, reviewer, or auditor.';
-COMMENT ON FUNCTION get_user_role() IS 'Returns the role of the current authenticated user.';
-COMMENT ON FUNCTION get_user_contracts() IS 'Returns array of contract IDs accessible to current user based on their role.';
-COMMENT ON FUNCTION fn_check_change_order_limit() IS 'Validates that change order cumulative impact does not exceed 10%% of base contract value.';
-
--- ============================================================================
--- END OF PRODUCTION SCHEMA
--- ============================================================================
+-- ─────────────────────────────────────────────────────────────────
+--  Storage buckets are provisioned in migration 002.
+--  See: 002_step0_fixes.sql → Section: Storage Buckets
+-- ─────────────────────────────────────────────────────────────────
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 2  —  PATCH  —  seq=synthetic
---  Source: synthetic
---  Reason: synthetic patch: change_order_staff_items + RLS (extracted from 003)
--- ════════════════════════════════════════════════════════════════════
--- ─── SYNTHETIC PATCH ───────────────────────────────────────────────
--- change_order_staff_items table — the only object in legacy 003 that
--- 010_production_schema.sql does NOT create.
--- ───────────────────────────────────────────────────────────────────
-
-CREATE TABLE IF NOT EXISTS change_order_staff_items (
-  id              UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
-  change_order_id UUID          NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
-  item_no         INTEGER       NOT NULL,
-  position        TEXT          NOT NULL,
-  position_ar     TEXT,
-  monthly_rate    NUMERIC(10,2) NOT NULL DEFAULT 0,
-  contract_months INTEGER       NOT NULL DEFAULT 24,
-  total_value     NUMERIC(15,2) GENERATED ALWAYS AS (monthly_rate * contract_months) STORED,
-  notes           TEXT,
-  created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  CONSTRAINT co_staff_items_co_item_unique UNIQUE (change_order_id, item_no)
-);
-
-CREATE INDEX IF NOT EXISTS idx_co_staff_items_co
-  ON change_order_staff_items(change_order_id);
-
-ALTER TABLE change_order_staff_items ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "co_staff_internal_all"     ON change_order_staff_items;
-DROP POLICY IF EXISTS "co_staff_external_select"  ON change_order_staff_items;
-DROP POLICY IF EXISTS "co_staff_external_insert"  ON change_order_staff_items;
-DROP POLICY IF EXISTS "co_staff_external_update"  ON change_order_staff_items;
-DROP POLICY IF EXISTS "co_staff_external_delete"  ON change_order_staff_items;
-
-CREATE POLICY "co_staff_internal_all" ON change_order_staff_items FOR ALL USING (is_internal());
-
-CREATE POLICY "co_staff_external_select" ON change_order_staff_items FOR SELECT
-USING (change_order_id IN (
-  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-  WHERE ct.external_user_id = auth.uid()
-));
-
-CREATE POLICY "co_staff_external_insert" ON change_order_staff_items FOR INSERT
-WITH CHECK (change_order_id IN (
-  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-  WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
-));
-
-CREATE POLICY "co_staff_external_update" ON change_order_staff_items FOR UPDATE
-USING (change_order_id IN (
-  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-  WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
-))
-WITH CHECK (change_order_id IN (
-  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-  WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
-));
-
-CREATE POLICY "co_staff_external_delete" ON change_order_staff_items FOR DELETE
-USING (change_order_id IN (
-  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-  WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
-));
-
-
--- ════════════════════════════════════════════════════════════════════
---  STEP 3  —  MIGRATION  —  seq=002
+--  STEP 2  —  MIGRATION  —  seq=002
 --  Source: legacy: migrations/002_step0_fixes.sql
 --  Reason: step 0 fixes + storage buckets
 -- ════════════════════════════════════════════════════════════════════
@@ -1580,7 +1335,1186 @@ CREATE POLICY "storage_avatars_upload_own"
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 4  —  MIGRATION  —  seq=006
+--  STEP 3  —  MIGRATION  —  seq=003
+--  Source: legacy: migrations/003_change_orders_and_hardening.sql
+--  Reason: change_orders + change_order_boq_items + change_order_staff_items + workflow
+-- ════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════
+--  CONVERA — Change Orders & Hardening
+--  File:    003_change_orders_and_hardening.sql
+--
+--  Run order: 3 of 4 (bootstrap sequence)
+--  Depends on: 001_base_schema.sql, 002_step0_fixes.sql
+--
+--  Contents:
+--    A. New ENUM: change_order_status
+--    B. New tables
+--         1. change_orders
+--         2. change_order_boq_items
+--         3. change_order_staff_items
+--         4. change_order_workflow
+--    C. Notification type extensions (change order events)
+--    D. Variation approval blocker trigger
+--         fn_block_approval_if_variation_unresolved()
+--         trg_block_claim_approval ON claims
+--    E. Indexes
+--    F. RLS — change order tables (4 tables × per-operation policies)
+--
+--  Architecture notes:
+--
+--  change_orders are contract-level records — they are NOT attached to
+--  individual claims. Once a CO reaches status='approved', its items
+--  are merged into the claim template for ALL future claims whose
+--  period_from >= co.effective_from. This merging happens in the
+--  buildClaimTemplate() server utility (claim-template.ts).
+--
+--  Bootstrap note:
+--    claim_boq_items.change_order_id and claim_staff_items.change_order_id
+--    could not be defined in 001 (FK to change_orders which didn't exist yet).
+--    Section B below adds these FK columns via ALTER TABLE ADD COLUMN IF NOT EXISTS
+--    immediately after change_orders is created, then updates the RLS policies
+--    on those tables to add the change_order_id IS NULL write guard.
+--
+--  claim_boq_items.change_order_id and claim_staff_items.change_order_id
+--  are SYSTEM-DERIVED: set by the server action from the template,
+--  never by user form input. Three layers enforce this:
+--    1. UI: no form input for change_order_id
+--    2. Server action: strips change_order_id from user-submitted data
+--    3. RLS: external INSERT/UPDATE policies (updated in Section B below)
+--
+--  The variation trigger added here (fn_block_approval_if_variation_unresolved)
+--  is replaced in migration 004 to add the director override path.
+--  The trigger itself (trg_block_claim_approval) is NOT re-created in 004 —
+--  CREATE OR REPLACE on the function updates it in-place.
+-- ═══════════════════════════════════════════════════════════════════
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  A. ENUM: change_order_status
+-- ─────────────────────────────────────────────────────────────────
+
+CREATE TYPE change_order_status AS ENUM (
+  'draft',
+  'submitted',
+  'under_admin_review',
+  'pending_director_approval',
+  'approved',       -- terminal: CO is in force
+  'rejected'        -- terminal: CO is cancelled
+);
+
+COMMENT ON TYPE change_order_status IS
+  'Five-stage workflow for Change Orders. '
+  'approved is terminal — approved COs are permanent contract records. '
+  'Transitions: draft→submitted→under_admin_review→pending_director_approval→approved|rejected.';
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  B. NEW TABLES
+-- ─────────────────────────────────────────────────────────────────
+
+-- ── B1. change_orders ─────────────────────────────────────────────
+
+CREATE TABLE change_orders (
+  id               UUID                PRIMARY KEY DEFAULT uuid_generate_v4(),
+  contract_id      UUID                NOT NULL REFERENCES contracts(id) ON DELETE RESTRICT,
+  co_no            TEXT                NOT NULL,     -- e.g. 'VO-01', 'VO-02'
+  title            TEXT                NOT NULL,
+  title_ar         TEXT                NOT NULL,
+  description      TEXT,
+
+  -- Scope classification
+  scope_type       TEXT                NOT NULL DEFAULT 'combined'
+    CONSTRAINT co_scope_type_check
+    CHECK (scope_type IN (
+      'boq_addition',       -- adds new deliverable BOQ items
+      'staff_addition',     -- adds new staff positions
+      'price_adjustment',   -- modifies unit prices of existing items
+      'duration_extension', -- extends contract duration
+      'scope_reduction',    -- reduces or removes scope
+      'combined'            -- multiple change types
+    )),
+
+  status           change_order_status NOT NULL DEFAULT 'draft',
+
+  -- Financial impact
+  value_added      NUMERIC(15,2)       NOT NULL DEFAULT 0,    -- new scope added (positive)
+  value_deducted   NUMERIC(15,2)       NOT NULL DEFAULT 0,    -- scope removed (stored positive)
+  net_value_change NUMERIC(15,2)       GENERATED ALWAYS AS (value_added - value_deducted) STORED,
+  duration_change  INTEGER             DEFAULT 0,             -- months: positive=extension
+
+  -- Effective date: first claim period this CO's items apply to
+  effective_from   DATE,
+
+  -- People
+  submitted_by     UUID                REFERENCES profiles(id),
+  reviewed_by      UUID                REFERENCES profiles(id),
+  approved_by      UUID                REFERENCES profiles(id),
+
+  -- Notes
+  rejection_reason TEXT,
+  review_notes     TEXT,
+  return_reason    TEXT,
+
+  -- Timestamps
+  submitted_at     TIMESTAMPTZ,
+  reviewed_at      TIMESTAMPTZ,
+  approved_at      TIMESTAMPTZ,
+  created_by       UUID                NOT NULL REFERENCES profiles(id),
+  updated_by       UUID                REFERENCES profiles(id),
+  created_at       TIMESTAMPTZ         NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ         NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT change_orders_contract_co_no_unique UNIQUE (contract_id, co_no)
+);
+
+COMMENT ON TABLE change_orders IS
+  'Formal contract scope modifications. Linked to contracts, not individual claims. '
+  'Once approved, CO items appear in all claim templates with period_from >= effective_from. '
+  'Items defined in change_order_boq_items and change_order_staff_items.';
+
+
+-- ── B2. change_order_boq_items ────────────────────────────────────
+
+CREATE TABLE change_order_boq_items (
+  id              UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  change_order_id UUID          NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
+  item_no         INTEGER       NOT NULL,
+  description     TEXT          NOT NULL,
+  description_ar  TEXT,
+  unit            TEXT          NOT NULL DEFAULT 'عدد',
+  unit_price      NUMERIC(15,2) NOT NULL DEFAULT 0,
+
+  -- Quantity and progress model: carried into claim_boq_items at template build time
+  contractual_qty NUMERIC(10,4) NOT NULL DEFAULT 1,
+  progress_model  TEXT
+    CONSTRAINT co_boq_pm_check
+    CHECK (progress_model IN ('count', 'percentage', 'monthly_lump_sum')),
+    -- NULL = inherit from parent contract.boq_progress_model
+
+  -- Total contractual value of this CO item (display/reporting only)
+  total_value     NUMERIC(15,2) GENERATED ALWAYS AS (unit_price * contractual_qty) STORED,
+
+  -- Functional classification
+  item_type       TEXT          NOT NULL DEFAULT 'report'
+    CONSTRAINT co_boq_item_type_check
+    CHECK (item_type IN ('report', 'supervision_lump', 'other')),
+
+  notes           TEXT,
+  created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT co_boq_items_co_item_unique UNIQUE (change_order_id, item_no)
+);
+
+COMMENT ON TABLE change_order_boq_items IS
+  'BOQ line items introduced by a Change Order. '
+  'Merged into claim BOQ templates by mergeCOBOQItems() for claims '
+  'with period_from >= co.effective_from. '
+  'progress_model: NULL inherits contract default; set explicitly for '
+  'items of a different type (e.g. supervision_lump in a count-based contract).';
+
+COMMENT ON COLUMN change_order_boq_items.contractual_qty IS
+  'Maximum claimable quantity for this CO BOQ item. '
+  'Determines when requires_variation is triggered. '
+  'count: 1 for a single-delivery report. '
+  'monthly_lump_sum: total contracted months (e.g. 24 for VO-01 supervision).';
+
+
+-- ── B3. change_order_staff_items ──────────────────────────────────
+
+CREATE TABLE change_order_staff_items (
+  id              UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+  change_order_id UUID          NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
+  item_no         INTEGER       NOT NULL,
+  position        TEXT          NOT NULL,
+  position_ar     TEXT,
+  monthly_rate    NUMERIC(10,2) NOT NULL DEFAULT 0,
+
+  -- contract_months: MUST be stored per row — different positions have different durations.
+  -- Real data: VO-01 positions mostly 24 months, منسق فني = 25 months.
+  contract_months INTEGER       NOT NULL DEFAULT 24,
+
+  total_value     NUMERIC(15,2) GENERATED ALWAYS AS (monthly_rate * contract_months) STORED,
+  notes           TEXT,
+  created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT co_staff_items_co_item_unique UNIQUE (change_order_id, item_no)
+);
+
+COMMENT ON TABLE change_order_staff_items IS
+  'Staff positions added by a Change Order. '
+  'contract_months stored per row — never inherited from contract header. '
+  'Real data: most VO-01 positions = 24 months, منسق فني = 25 months. '
+  'Merged into claim staff templates by mergeCOStaffItems().';
+
+
+-- ── B4. change_order_workflow ─────────────────────────────────────
+
+CREATE TABLE change_order_workflow (
+  id              UUID                PRIMARY KEY DEFAULT uuid_generate_v4(),
+  change_order_id UUID                NOT NULL REFERENCES change_orders(id) ON DELETE CASCADE,
+  action          TEXT                NOT NULL
+    CONSTRAINT co_workflow_action_check
+    CHECK (action IN (
+      'submit',        -- CO submitted for review
+      'admin_review',  -- admin/director begins review
+      'co_return',     -- returned to draft (admin or director)
+      'forward',       -- forwarded to pending_director_approval
+      'approve',       -- director final approval
+      'reject',        -- director final rejection
+      'comment'        -- informational note, no status change
+    )),
+  from_status     change_order_status,
+  to_status       change_order_status,
+  actor_id        UUID                NOT NULL REFERENCES profiles(id),
+  notes           TEXT,
+  created_at      TIMESTAMPTZ         NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE change_order_workflow IS
+  'Immutable audit trail of Change Order state transitions. '
+  'Shape mirrors claim_workflow for component reuse on the CO detail page.';
+
+
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  B. DEFERRED FK COLUMNS  (could not be in 001 — change_orders didn't exist)
+--
+--  Now that change_orders exists, add change_order_id to the two claim
+--  line item tables and update their external RLS write policies to
+--  enforce change_order_id IS NULL (system-derived only).
+--
+--  All operations use IF NOT EXISTS / IF EXISTS for idempotency.
+-- ─────────────────────────────────────────────────────────────────
+
+-- B1. claim_boq_items.change_order_id
+--
+--  NULL  = base contract item
+--  non-NULL = item introduced by the referenced Change Order
+--
+--  SET NULL on CO delete preserves the claim row (requires_variation
+--  will still flag it). The server action never sets this from user input.
+
+ALTER TABLE claim_boq_items
+  ADD COLUMN IF NOT EXISTS change_order_id UUID
+    REFERENCES change_orders(id) ON DELETE SET NULL;
+
+COMMENT ON COLUMN claim_boq_items.change_order_id IS
+  'System-derived FK. NULL = base contract item. '
+  'Set by server action from template, never by user input. '
+  'RLS below enforces change_order_id IS NULL on external INSERT/UPDATE.';
+
+
+-- B2. claim_staff_items.change_order_id (same semantics)
+
+ALTER TABLE claim_staff_items
+  ADD COLUMN IF NOT EXISTS change_order_id UUID
+    REFERENCES change_orders(id) ON DELETE SET NULL;
+
+COMMENT ON COLUMN claim_staff_items.change_order_id IS
+  'System-derived FK. NULL = base contract staff position. '
+  'Set by server action from template, never by user input.';
+
+
+-- B3. Partial indexes on the new FK columns
+
+CREATE INDEX IF NOT EXISTS idx_claim_boq_co_id
+  ON claim_boq_items(change_order_id)
+  WHERE change_order_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_claim_staff_co_id
+  ON claim_staff_items(change_order_id)
+  WHERE change_order_id IS NOT NULL;
+
+
+-- B4. Update RLS: add change_order_id IS NULL guard to external write policies
+--
+--  The policies created in 001 did not have this guard (column didn't exist).
+--  Drop and recreate them with the full guard now that the column exists.
+
+-- claim_boq_items insert — add change_order_id IS NULL guard
+DROP POLICY IF EXISTS "claim_boq_external_insert" ON claim_boq_items;
+CREATE POLICY "claim_boq_external_insert"
+  ON claim_boq_items FOR INSERT
+  WITH CHECK (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+    AND change_order_id IS NULL   -- system-derived only; external cannot set this
+  );
+
+-- claim_boq_items update — add change_order_id IS NULL guard to WITH CHECK
+DROP POLICY IF EXISTS "claim_boq_external_update" ON claim_boq_items;
+CREATE POLICY "claim_boq_external_update"
+  ON claim_boq_items FOR UPDATE
+  USING (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  )
+  WITH CHECK (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+    AND change_order_id IS NULL
+  );
+
+-- claim_staff_items insert
+DROP POLICY IF EXISTS "claim_staff_external_insert" ON claim_staff_items;
+CREATE POLICY "claim_staff_external_insert"
+  ON claim_staff_items FOR INSERT
+  WITH CHECK (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+    AND change_order_id IS NULL
+  );
+
+-- claim_staff_items update
+DROP POLICY IF EXISTS "claim_staff_external_update" ON claim_staff_items;
+CREATE POLICY "claim_staff_external_update"
+  ON claim_staff_items FOR UPDATE
+  USING (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  )
+  WITH CHECK (
+    claim_id IN (
+      SELECT c.id FROM claims c
+      JOIN contracts ct ON c.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+    AND change_order_id IS NULL
+  );
+
+-- ─────────────────────────────────────────────────────────────────
+--  C. NOTIFICATION TYPE EXTENSIONS
+--
+--  ADD VALUE must run outside a transaction if the type is already in use.
+--  IF NOT EXISTS (PostgreSQL 9.6+) makes this idempotent.
+-- ─────────────────────────────────────────────────────────────────
+
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'change_order_submitted';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'change_order_approved';
+ALTER TYPE notification_type ADD VALUE IF NOT EXISTS 'change_order_required';
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  D. TRIGGERS
+-- ─────────────────────────────────────────────────────────────────
+
+-- D1. updated_at on change_orders
+CREATE TRIGGER trg_change_orders_updated_at
+  BEFORE UPDATE ON change_orders
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+
+-- D2. Variation approval blocker
+--
+--  RULE:
+--    A claim CANNOT transition to status='approved' if any of its BOQ items have:
+--      requires_variation = TRUE
+--      AND (change_order_id IS NULL OR linked CO is not yet 'approved')
+--
+--  ENFORCEMENT LAYERS:
+--    Layer 1 (UX): approveClaimAction() server action runs a pre-flight query
+--                  and returns a typed VARIATION_UNRESOLVED error before the
+--                  DB write, giving the UI rich data for the override modal.
+--    Layer 2 (DB): This trigger fires on EVERY claims UPDATE, regardless of
+--                  client, API route, or script. It is the authoritative guard.
+--
+--  TRIGGER FIRES WHEN:
+--    NEW.status = 'approved' AND OLD.status IS DISTINCT FROM 'approved'
+--    (Only on the transition TO approved — not on every update)
+--
+--  ERROR FORMAT (SQLSTATE P0001):
+--    CONVERA_VARIATION_UNRESOLVED:claim={uuid}:items={n,...}:count={n}
+--    Parsed by parseTriggerError() in claim-calculations.ts.
+--
+--  NOTE: This function is REPLACED in migration 004 to add the director
+--  override path (variation_override_by IS NOT NULL).
+--  The trigger DDL itself is NOT recreated in 004 — CREATE OR REPLACE
+--  on the function updates it in-place.
+
+CREATE OR REPLACE FUNCTION fn_block_approval_if_variation_unresolved()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_unresolved_count INTEGER;
+  v_unresolved_items TEXT;
+BEGIN
+  IF NEW.status = 'approved' AND (OLD.status IS DISTINCT FROM 'approved') THEN
+
+    SELECT COUNT(*)
+    INTO   v_unresolved_count
+    FROM   claim_boq_items boq
+    WHERE  boq.claim_id          = NEW.id
+      AND  boq.requires_variation = TRUE
+      AND  (
+             boq.change_order_id IS NULL
+             OR (
+               SELECT co.status FROM change_orders co
+               WHERE  co.id = boq.change_order_id
+             ) <> 'approved'
+           );
+
+    IF v_unresolved_count > 0 THEN
+
+      SELECT string_agg(boq.item_no::TEXT, ',' ORDER BY boq.item_no)
+      INTO   v_unresolved_items
+      FROM   claim_boq_items boq
+      WHERE  boq.claim_id          = NEW.id
+        AND  boq.requires_variation = TRUE
+        AND  (
+               boq.change_order_id IS NULL
+               OR (
+                 SELECT co.status FROM change_orders co
+                 WHERE  co.id = boq.change_order_id
+               ) <> 'approved'
+             );
+
+      RAISE EXCEPTION
+        'CONVERA_VARIATION_UNRESOLVED:claim=%:items=%:count=%',
+        NEW.id, v_unresolved_items, v_unresolved_count
+        USING ERRCODE = 'P0001';
+
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION fn_block_approval_if_variation_unresolved() IS
+  'Blocks claims.status transition to approved when any BOQ item has '
+  'requires_variation=TRUE without a linked approved Change Order. '
+  'REPLACED in migration 004 to also honour director override '
+  '(variation_override_by IS NOT NULL). '
+  'Error: CONVERA_VARIATION_UNRESOLVED:claim={uuid}:items={n,...}:count={n}. '
+  'SQLSTATE P0001.';
+
+CREATE TRIGGER trg_block_claim_approval
+  BEFORE UPDATE ON claims
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_block_approval_if_variation_unresolved();
+
+COMMENT ON TRIGGER trg_block_claim_approval ON claims IS
+  'DB-level enforcement of the variation approval rule. '
+  'Cannot be bypassed via direct DB writes. '
+  'Complements the Layer 1 pre-flight check in approveClaimAction() server action. '
+  'The trigger function is updated in-place by migration 004.';
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  E. INDEXES
+-- ─────────────────────────────────────────────────────────────────
+
+-- change_orders
+CREATE INDEX IF NOT EXISTS idx_change_orders_contract   ON change_orders(contract_id);
+CREATE INDEX IF NOT EXISTS idx_change_orders_status     ON change_orders(status);
+CREATE INDEX IF NOT EXISTS idx_change_orders_effective  ON change_orders(effective_from)
+  WHERE status = 'approved';   -- partial: only approved COs queried by effective_from
+
+-- Change order line items
+CREATE INDEX IF NOT EXISTS idx_co_boq_items_co          ON change_order_boq_items(change_order_id);
+CREATE INDEX IF NOT EXISTS idx_co_staff_items_co        ON change_order_staff_items(change_order_id);
+CREATE INDEX IF NOT EXISTS idx_co_boq_progress_model    ON change_order_boq_items(progress_model)
+  WHERE progress_model IS NOT NULL;
+
+-- Change order workflow
+CREATE INDEX IF NOT EXISTS idx_co_workflow_co           ON change_order_workflow(change_order_id);
+CREATE INDEX IF NOT EXISTS idx_co_workflow_created      ON change_order_workflow(created_at DESC);
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  F. RLS — CHANGE ORDER TABLES
+--
+--  Pattern:
+--    Internal users (director/admin/reviewer): FOR ALL USING (is_internal())
+--    External users: explicit per-operation policies.
+--
+--  Status transition note:
+--    Status changes (draft→submitted, etc.) are performed by server actions
+--    using the service role client, bypassing RLS.
+--    External client policies therefore only need to cover DRAFT operations.
+-- ─────────────────────────────────────────────────────────────────
+
+ALTER TABLE change_orders            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE change_order_boq_items   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE change_order_staff_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE change_order_workflow    ENABLE ROW LEVEL SECURITY;
+
+
+-- F1. change_orders
+
+CREATE POLICY "co_internal_all"
+  ON change_orders FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "co_external_select"
+  ON change_orders FOR SELECT
+  USING (
+    contract_id IN (
+      SELECT id FROM contracts WHERE external_user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "co_external_insert"
+  ON change_orders FOR INSERT
+  WITH CHECK (
+    created_by = auth.uid()
+    AND status = 'draft'
+    AND contract_id IN (
+      SELECT id FROM contracts
+      WHERE  external_user_id = auth.uid()
+        AND  status = 'active'
+    )
+  );
+
+-- External users may only edit draft COs they created/submitted.
+-- WITH CHECK restricts write-back to draft status only (prevents self-escalation).
+CREATE POLICY "co_external_update_draft"
+  ON change_orders FOR UPDATE
+  USING (
+    (created_by = auth.uid() OR submitted_by = auth.uid())
+    AND status = 'draft'
+  )
+  WITH CHECK (
+    (created_by = auth.uid() OR submitted_by = auth.uid())
+    AND status = 'draft'
+  );
+
+
+-- F2. change_order_boq_items
+
+CREATE POLICY "co_boq_internal_all"
+  ON change_order_boq_items FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "co_boq_external_select"
+  ON change_order_boq_items FOR SELECT
+  USING (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "co_boq_external_insert"
+  ON change_order_boq_items FOR INSERT
+  WITH CHECK (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+        AND co.status = 'draft'
+    )
+  );
+
+CREATE POLICY "co_boq_external_update"
+  ON change_order_boq_items FOR UPDATE
+  USING (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+        AND co.status = 'draft'
+    )
+  )
+  WITH CHECK (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+        AND co.status = 'draft'
+    )
+  );
+
+CREATE POLICY "co_boq_external_delete"
+  ON change_order_boq_items FOR DELETE
+  USING (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+        AND co.status = 'draft'
+    )
+  );
+
+
+-- F3. change_order_staff_items  (same structure as BOQ items)
+
+CREATE POLICY "co_staff_internal_all"
+  ON change_order_staff_items FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "co_staff_external_select"
+  ON change_order_staff_items FOR SELECT
+  USING (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "co_staff_external_insert"
+  ON change_order_staff_items FOR INSERT
+  WITH CHECK (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+        AND co.status = 'draft'
+    )
+  );
+
+CREATE POLICY "co_staff_external_update"
+  ON change_order_staff_items FOR UPDATE
+  USING (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+        AND co.status = 'draft'
+    )
+  )
+  WITH CHECK (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+        AND co.status = 'draft'
+    )
+  );
+
+CREATE POLICY "co_staff_external_delete"
+  ON change_order_staff_items FOR DELETE
+  USING (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+        AND co.status = 'draft'
+    )
+  );
+
+
+-- F4. change_order_workflow
+
+CREATE POLICY "co_workflow_internal_all"
+  ON change_order_workflow FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "co_workflow_external_select"
+  ON change_order_workflow FOR SELECT
+  USING (
+    change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  );
+
+-- External users may only log submit and comment actions.
+-- Internal review/forward/approve/reject entries are written via service role.
+CREATE POLICY "co_workflow_external_insert"
+  ON change_order_workflow FOR INSERT
+  WITH CHECK (
+    actor_id = auth.uid()
+    AND action IN ('submit', 'comment')
+    AND change_order_id IN (
+      SELECT co.id FROM change_orders co
+      JOIN contracts ct ON co.contract_id = ct.id
+      WHERE ct.external_user_id = auth.uid()
+    )
+  );
+
+
+-- ════════════════════════════════════════════════════════════════════
+--  STEP 4  —  MIGRATION  —  seq=004
+--  Source: legacy: migrations/004_contract_templates_and_progress_models.sql
+--  Reason: contract_boq_templates + contract_staff_templates + boq_progress_model enum
+-- ════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════
+--  CONVERA — Contract Templates & Progress Models
+--  File:    004_contract_templates_and_progress_models.sql
+--
+--  Run order: 4 of 4 (final migration)
+--  Depends on: 001, 002, 003
+--
+--  Motivation:
+--    Analysis of real contracts (231001101771 Beeah, 241039011332 Sharat)
+--    revealed a schema gap and two behavioural requirements:
+--
+--    Gap: No table stores the per-contract BOQ and staff item definitions
+--         that buildClaimTemplate() needs to construct the claim form.
+--
+--    Behavioural req 1: The BOQ progress model (count/percentage/monthly_lump_sum)
+--         varies by contract and by item. The contract provides a default;
+--         individual items may override it.
+--
+--    Behavioural req 2: Items 1 & 2 in contract 231001101771 were each
+--         claimed twice (200% of unit_price) and approved without a formal CO.
+--         The variation trigger must allow a director to explicitly override
+--         the block with written justification — the "soft block" model.
+--
+--  Contents:
+--    A. Column additions to contracts
+--         1. contracts.boq_progress_model
+--    B. Column additions to claim_boq_items
+--         2. progress_model     (item-level override — already in 001)
+--         3. contractual_qty    (already in 001)
+--         4–6. variation_override_* (already in 001)
+--    C. Column additions to change_order_boq_items
+--         7. progress_model
+--         8. contractual_qty    (already in 003)
+--    D. New tables
+--         9.  contract_boq_templates
+--        10.  contract_staff_templates
+--    E. updated_at triggers for new tables
+--    F. Replace fn_block_approval_if_variation_unresolved()
+--         — adds director override (variation_override_by IS NOT NULL) path
+--    G. Indexes
+--    H. RLS for new template tables
+--
+--  NOTE on idempotency:
+--    Section B and C columns (progress_model, contractual_qty,
+--    variation_override_*) are already defined in 001_base_schema.sql.
+--    The ALTER TABLE ADD COLUMN IF NOT EXISTS statements here are
+--    intentional safe no-ops — they document intent and allow this
+--    file to run cleanly if the columns somehow don't exist.
+--
+--    Section C (change_order_boq_items columns) are already in 003.
+--    Again, safe no-ops with IF NOT EXISTS.
+-- ═══════════════════════════════════════════════════════════════════
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  A. contracts.boq_progress_model
+--
+--  Contract-level default billing model for all base BOQ items.
+--
+--  Supported values and computation rules:
+--
+--    'count'
+--      Input:   curr_progress = decimal completion count (0.66, 1, 2 …)
+--      Formula: period_amount = curr_progress × unit_price
+--      Overage: (prev + curr) > contractual_qty
+--      Use:     Engineering report deliverables (contract 231001101771)
+--               Construction items measured by count or linear metre
+--
+--    'percentage'
+--      Input:   curr_progress = 0–100+ (percent of item scope this period)
+--      Formula: period_amount = (curr_progress / 100) × unit_price
+--      Overage: (prev + curr) > 100
+--      Use:     Standard construction BOQ with percentage completion
+--
+--    'monthly_lump_sum'
+--      Input:   curr_progress = months attended (0 or 1 typically)
+--      Formula: period_amount = curr_progress × unit_price (monthly rate)
+--      Overage: (prev + curr) > contractual_qty
+--      Use:     VO-01 supervision lump sum (465,000 SAR/month × 24 months)
+--
+--  Item-level overrides in contract_boq_templates.progress_model and
+--  claim_boq_items.progress_model take precedence when non-NULL.
+--  Staff items always use 'days_prorated' — this column does not apply to them.
+-- ─────────────────────────────────────────────────────────────────
+
+ALTER TABLE contracts
+  ADD COLUMN IF NOT EXISTS boq_progress_model TEXT NOT NULL DEFAULT 'count'
+    CONSTRAINT contracts_boq_progress_model_check
+    CHECK (boq_progress_model IN ('count', 'percentage', 'monthly_lump_sum'));
+
+COMMENT ON COLUMN contracts.boq_progress_model IS
+  'Default progress model for all base BOQ items in this contract. '
+  'count: period_amount = curr × unit_price; overage when (prev+curr) > contractual_qty. '
+  'percentage: period_amount = (curr/100) × unit_price; overage when (prev+curr) > 100. '
+  'monthly_lump_sum: period_amount = curr × unit_price; overage when (prev+curr) > contractual_qty. '
+  'Item-level overrides (contract_boq_templates.progress_model) take precedence when non-NULL. '
+  'Staff items always use days_prorated — this column does not apply to them.';
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  B. claim_boq_items column additions (idempotent — already in 001)
+--
+--  These ALTER TABLE statements are safe no-ops when 001 has already
+--  created the columns. Kept for completeness and to document intent.
+-- ─────────────────────────────────────────────────────────────────
+
+-- B2. Item-level progress model override (NULL = inherit contract default)
+ALTER TABLE claim_boq_items
+  ADD COLUMN IF NOT EXISTS progress_model TEXT
+    CONSTRAINT claim_boq_items_progress_model_check
+    CHECK (progress_model IN ('count', 'percentage', 'monthly_lump_sum'));
+
+-- B3. Contracted quantity — overage threshold for requires_variation flag
+ALTER TABLE claim_boq_items
+  ADD COLUMN IF NOT EXISTS contractual_qty NUMERIC(10,4) NOT NULL DEFAULT 1;
+
+-- B4–B6. Director override path for unresolved variations
+--
+--  A variation row is FULLY RESOLVED when EITHER:
+--    (a) change_order_id → approved Change Order (formal CO path)
+--    (b) variation_override_by IS NOT NULL       (director override path)
+--
+--  The director override is audited: the server action logs an audit_logs
+--  entry with action='approve' and metadata.variation_override=true.
+--  This provides full accountability without requiring a formal CO.
+ALTER TABLE claim_boq_items
+  ADD COLUMN IF NOT EXISTS variation_override_by    UUID REFERENCES profiles(id);
+ALTER TABLE claim_boq_items
+  ADD COLUMN IF NOT EXISTS variation_override_notes TEXT;
+ALTER TABLE claim_boq_items
+  ADD COLUMN IF NOT EXISTS variation_override_at    TIMESTAMPTZ;
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  C. change_order_boq_items column additions (idempotent)
+-- ─────────────────────────────────────────────────────────────────
+
+-- C7. Progress model for CO BOQ items (NULL = inherit contract default)
+--     Must be set explicitly when the CO adds items of a different type
+--     than the contract default (e.g. supervision_lump in a count contract).
+ALTER TABLE change_order_boq_items
+  ADD COLUMN IF NOT EXISTS progress_model TEXT
+    CONSTRAINT co_boq_items_pm_check
+    CHECK (progress_model IN ('count', 'percentage', 'monthly_lump_sum'));
+
+-- C8. Contractual quantity (already in 003 — idempotent)
+ALTER TABLE change_order_boq_items
+  ADD COLUMN IF NOT EXISTS contractual_qty NUMERIC(10,4) NOT NULL DEFAULT 1;
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  D. NEW TABLES
+-- ─────────────────────────────────────────────────────────────────
+
+-- ── D9. contract_boq_templates ────────────────────────────────────
+--
+--  Master list of claimable BOQ deliverables per contract.
+--  This is the source of truth for buildClaimTemplate() —
+--  it queries this table to populate the BOQ rows of a new claim.
+--
+--  WRITE OWNERSHIP:
+--    Internal users manage template rows at contract setup time.
+--    External users have SELECT-only access to their contract's templates.
+--    Scope changes after contract activation go through Change Orders.
+--
+--  SNAPSHOT MODEL:
+--    Claim rows are point-in-time snapshots. Changes to templates after a
+--    claim is drafted do NOT retroactively affect that claim.
+--
+--  progress_model NULL: inherit contract.boq_progress_model.
+--  progress_model set:  use this model for this item regardless of contract default.
+
+CREATE TABLE IF NOT EXISTS contract_boq_templates (
+  id              UUID          NOT NULL DEFAULT uuid_generate_v4(),
+  contract_id     UUID          NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+  item_no         INTEGER       NOT NULL,
+  description     TEXT          NOT NULL,
+  description_ar  TEXT,
+
+  unit            TEXT          NOT NULL DEFAULT 'عدد',
+  unit_price      NUMERIC(15,2) NOT NULL DEFAULT 0,
+  contractual_qty NUMERIC(10,4) NOT NULL DEFAULT 1,
+
+  -- NULL = inherit contract.boq_progress_model
+  progress_model  TEXT
+    CONSTRAINT cbt_progress_model_check
+    CHECK (progress_model IN ('count', 'percentage', 'monthly_lump_sum')),
+
+  -- Display order in the claim form BOQ section
+  sort_order      INTEGER       NOT NULL DEFAULT 0,
+
+  created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT contract_boq_templates_pkey            PRIMARY KEY (id),
+  CONSTRAINT contract_boq_templates_contract_item   UNIQUE (contract_id, item_no)
+);
+
+COMMENT ON TABLE contract_boq_templates IS
+  'Master BOQ item definitions per contract. '
+  'Queried by loadContractBOQTemplate() to build new claim forms. '
+  'Read-only for external users. Managed by admin/director at contract setup. '
+  'Scope additions after contract activation go through Change Orders.';
+
+COMMENT ON COLUMN contract_boq_templates.contractual_qty IS
+  'Maximum claimable quantity. When (prev_progress + curr_progress) exceeds '
+  'this value, requires_variation is set TRUE on the claim row. '
+  'count/monthly_lump_sum: typical value is 1 (one report) or 24 (months). '
+  'percentage: this column is not used (overage is always vs 100%).';
+
+COMMENT ON COLUMN contract_boq_templates.progress_model IS
+  'Item-level override. NULL = inherit contract.boq_progress_model. '
+  'Set explicitly when this item uses a different billing model than the contract. '
+  'Example: supervision lump sum item in a count-based contract → monthly_lump_sum.';
+
+
+-- ── D10. contract_staff_templates ────────────────────────────────
+--
+--  Master list of contracted staff positions per contract.
+--  Used by loadContractStaffTemplate() to build the staff section of a new claim.
+--  All staff items use the days_prorated billing model — no progress_model needed.
+--
+--  Staff billing formulas (verified against contract 231001101771 real data):
+--    basic_amount = (working_days / 30) × monthly_rate
+--    extra_amount = (monthly_rate / 192) × 1.5 × overtime_hours
+--    total_amount = basic_amount + extra_amount
+--    after_perf   = total_amount × (performance_pct / 100)
+--
+--  Constants:
+--    30   = billing days per calendar month
+--    192  = billing hours per month (24 working days × 8 hours/day)
+--    1.5  = KSA standard overtime multiplier
+
+CREATE TABLE IF NOT EXISTS contract_staff_templates (
+  id              UUID          NOT NULL DEFAULT uuid_generate_v4(),
+  contract_id     UUID          NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+  item_no         INTEGER       NOT NULL,
+  position        TEXT          NOT NULL,
+  position_ar     TEXT,
+  monthly_rate    NUMERIC(10,2) NOT NULL DEFAULT 0,
+
+  -- CRITICAL: stored per row — do NOT inherit from contract header.
+  -- Real data: most VO-01 positions = 24 months, منسق فني = 25 months.
+  contract_months INTEGER       NOT NULL DEFAULT 24,
+
+  sort_order      INTEGER       NOT NULL DEFAULT 0,
+
+  created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT contract_staff_templates_pkey           PRIMARY KEY (id),
+  CONSTRAINT contract_staff_templates_contract_item  UNIQUE (contract_id, item_no)
+);
+
+COMMENT ON TABLE contract_staff_templates IS
+  'Master staff position definitions per contract. '
+  'Queried by loadContractStaffTemplate() to build the staff section of new claim forms. '
+  'Staff always uses days_prorated billing — no progress_model column needed. '
+  'Read-only for external users. Managed by admin/director at contract setup.';
+
+COMMENT ON COLUMN contract_staff_templates.contract_months IS
+  'Total contracted months for this position. '
+  'Must be stored per row — different positions can have different durations. '
+  'Verified real data: VO-01 positions mostly = 24 months, منسق فني = 25 months.';
+
+COMMENT ON COLUMN contract_staff_templates.monthly_rate IS
+  'Monthly rate in SAR. '
+  'Used in: basic_amount = (working_days / 30) × monthly_rate, '
+  'and: extra_amount = (monthly_rate / 192) × 1.5 × overtime_hours.';
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  E. UPDATED_AT TRIGGERS FOR NEW TABLES
+-- ─────────────────────────────────────────────────────────────────
+
+CREATE TRIGGER trg_contract_boq_templates_updated_at
+  BEFORE UPDATE ON contract_boq_templates
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER trg_contract_staff_templates_updated_at
+  BEFORE UPDATE ON contract_staff_templates
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  F. REPLACE fn_block_approval_if_variation_unresolved()
+--
+--  CHANGES FROM MIGRATION 003:
+--    The original function only checked the CO resolution path.
+--    This version adds the director override path:
+--
+--    A BOQ row is UNRESOLVED when ALL of these are true:
+--      1. requires_variation = TRUE
+--      2. variation_override_by IS NULL     ← NEW condition
+--      3. No linked approved Change Order
+--
+--    A BOQ row is RESOLVED when EITHER:
+--      (a) linked CO has status = 'approved'
+--      (b) variation_override_by IS NOT NULL  ← NEW path
+--
+--  The trigger trg_block_claim_approval already exists from migration 003.
+--  CREATE OR REPLACE on the function updates it in-place — no trigger DDL needed.
+--
+--  Error format (unchanged):
+--    CONVERA_VARIATION_UNRESOLVED:claim={uuid}:items={n,...}:count={n}
+--    SQLSTATE P0001
+--    Parsed by parseTriggerError() in claim-calculations.ts.
+-- ─────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION fn_block_approval_if_variation_unresolved()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_unresolved_count INTEGER;
+  v_unresolved_items TEXT;
+BEGIN
+  -- Only enforce on the transition INTO 'approved'.
+  -- Re-approving an already-approved claim does NOT re-trigger the check.
+  IF NEW.status = 'approved' AND (OLD.status IS DISTINCT FROM 'approved') THEN
+
+    -- Count BOQ rows that are flagged and have NEITHER resolution path active.
+    --
+    -- UNRESOLVED when ALL of the following are true:
+    --   1. requires_variation = TRUE
+    --   2. variation_override_by IS NULL   (director override not applied)
+    --   3. No linked approved Change Order
+    SELECT COUNT(*)
+    INTO   v_unresolved_count
+    FROM   claim_boq_items boq
+    WHERE  boq.claim_id              = NEW.id
+      AND  boq.requires_variation    = TRUE
+      AND  boq.variation_override_by IS NULL  -- director override path not used
+      AND  (
+             boq.change_order_id IS NULL
+             OR (
+               SELECT co.status FROM change_orders co
+               WHERE  co.id = boq.change_order_id
+             ) <> 'approved'
+           );
+
+    IF v_unresolved_count > 0 THEN
+
+      -- Build comma-separated item numbers for the structured error.
+      -- parseTriggerError() extracts these to populate the override modal UI.
+      SELECT string_agg(boq.item_no::TEXT, ',' ORDER BY boq.item_no)
+      INTO   v_unresolved_items
+      FROM   claim_boq_items boq
+      WHERE  boq.claim_id              = NEW.id
+        AND  boq.requires_variation    = TRUE
+        AND  boq.variation_override_by IS NULL
+        AND  (
+               boq.change_order_id IS NULL
+               OR (
+                 SELECT co.status FROM change_orders co
+                 WHERE  co.id = boq.change_order_id
+               ) <> 'approved'
+             );
+
+      -- Raise with structured message for parseTriggerError()
+      RAISE EXCEPTION
+        'CONVERA_VARIATION_UNRESOLVED:claim=%:items=%:count=%',
+        NEW.id, v_unresolved_items, v_unresolved_count
+        USING ERRCODE = 'P0001';
+
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION fn_block_approval_if_variation_unresolved() IS
+  'Guards claims.status transition to approved. '
+  'Raises P0001 if any BOQ item has requires_variation=TRUE and is not resolved. '
+  'Resolution paths: (a) linked approved Change Order, OR (b) director override. '
+  'Migration 004 change: added variation_override_by IS NOT NULL check. '
+  'Trigger trg_block_claim_approval on claims fires this function. '
+  'Error format: CONVERA_VARIATION_UNRESOLVED:claim={uuid}:items={n,...}:count={n}.';
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  G. INDEXES
+-- ─────────────────────────────────────────────────────────────────
+
+-- Template tables — primary access pattern is always by contract
+CREATE INDEX IF NOT EXISTS idx_boq_tmpl_contract
+  ON contract_boq_templates(contract_id, sort_order);
+
+COMMENT ON INDEX idx_boq_tmpl_contract IS
+  'Supports loadContractBOQTemplate(contractId). '
+  'sort_order included for in-order retrieval without additional sort.';
+
+CREATE INDEX IF NOT EXISTS idx_staff_tmpl_contract
+  ON contract_staff_templates(contract_id, sort_order);
+
+COMMENT ON INDEX idx_staff_tmpl_contract IS
+  'Supports loadContractStaffTemplate(contractId). '
+  'sort_order included for in-order retrieval.';
+
+-- Partial index on non-NULL progress_model overrides in CO items
+CREATE INDEX IF NOT EXISTS idx_co_boq_items_pm
+  ON change_order_boq_items(progress_model)
+  WHERE progress_model IS NOT NULL;
+
+-- Partial index on non-NULL progress_model overrides in claim BOQ items
+CREATE INDEX IF NOT EXISTS idx_claim_boq_progress_model
+  ON claim_boq_items(progress_model)
+  WHERE progress_model IS NOT NULL;
+
+-- Variation override lookup — partial index for rows where override is set
+CREATE INDEX IF NOT EXISTS idx_claim_boq_override
+  ON claim_boq_items(claim_id, variation_override_by)
+  WHERE variation_override_by IS NOT NULL;
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  H. RLS FOR TEMPLATE TABLES
+--
+--  Internal users: full access (manage templates at contract setup).
+--  External users: SELECT only for their own contract's templates.
+--    They query templates to populate the claim form — no write access.
+-- ─────────────────────────────────────────────────────────────────
+
+ALTER TABLE contract_boq_templates   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contract_staff_templates ENABLE ROW LEVEL SECURITY;
+
+
+-- H1. contract_boq_templates
+
+CREATE POLICY "boq_tmpl_internal_all"
+  ON contract_boq_templates FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "boq_tmpl_external_select"
+  ON contract_boq_templates FOR SELECT
+  USING (
+    contract_id IN (
+      SELECT id FROM contracts WHERE external_user_id = auth.uid()
+    )
+  );
+
+
+-- H2. contract_staff_templates
+
+CREATE POLICY "staff_tmpl_internal_all"
+  ON contract_staff_templates FOR ALL
+  USING (is_internal());
+
+CREATE POLICY "staff_tmpl_external_select"
+  ON contract_staff_templates FOR SELECT
+  USING (
+    contract_id IN (
+      SELECT id FROM contracts WHERE external_user_id = auth.uid()
+    )
+  );
+
+
+-- ─────────────────────────────────────────────────────────────────
+--  END OF MIGRATION 004
+--
+--  Schema is now complete. Next step: run seed files.
+--  Seed order:
+--    001_seed.sql         — users (must create auth.users first via Supabase Auth)
+--    002_seed_<contract>  — per-contract BOQ and staff templates
+-- ─────────────────────────────────────────────────────────────────
+
+
+-- ════════════════════════════════════════════════════════════════════
+--  STEP 5  —  MIGRATION  —  seq=006
 --  Source: legacy: migrations/006_convera_users_otp.sql
 --  Reason: CONVERA_USERS + convera_otp tables
 -- ════════════════════════════════════════════════════════════════════
@@ -1704,7 +2638,7 @@ CREATE TRIGGER trg_convera_users_updated_at
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 5  —  MIGRATION  —  seq=007
+--  STEP 6  —  MIGRATION  —  seq=007
 --  Source: legacy: migrations/007_contract_amendments_enhancement.sql
 --  Reason: contract amendments enhancement
 -- ════════════════════════════════════════════════════════════════════
@@ -1950,7 +2884,7 @@ SELECT * FROM contract_ceiling_summary;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 6  —  MIGRATION  —  seq=008
+--  STEP 7  —  MIGRATION  —  seq=008
 --  Source: legacy: migrations/008_invoice_attachment_governance.sql
 --  Reason: invoice attachment governance
 -- ════════════════════════════════════════════════════════════════════
@@ -2030,9 +2964,111 @@ WHERE tablename = 'documents'
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 7  —  MIGRATION  —  seq=010b
+--  STEP 8  —  MIGRATION  —  seq=009
+--  Source: legacy: migrations/009_rename_claim_statuses.sql
+--  Reason: rename claim status enum values
+-- ════════════════════════════════════════════════════════════════════
+-- =============================================================
+-- Migration 009: Rename claim_status enum from 4-stage to 5-stage
+-- CONVERA Platform — 5-stage workflow alignment
+--
+-- Old (4-stage):  under_consultant_review → returned_by_consultant
+--                 under_admin_review      → returned_by_admin
+--
+-- New (5-stage):  under_supervisor_review → returned_by_supervisor
+--                 under_auditor_review    → returned_by_auditor
+--                 under_reviewer_check    (new — no old equivalent)
+--
+-- Run in Supabase SQL Editor BEFORE deploying updated frontend code.
+-- Safe to run multiple times (ADD VALUE IF NOT EXISTS).
+-- =============================================================
+
+-- ─── Step 1: Add all new enum values ────────────────────────────
+-- (PostgreSQL does not support removing enum values; old values remain
+-- but are no longer used by the application after data migration.)
+
+ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'under_supervisor_review' AFTER 'submitted';
+ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'returned_by_supervisor'  AFTER 'under_supervisor_review';
+ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'under_auditor_review'    AFTER 'returned_by_supervisor';
+ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'returned_by_auditor'     AFTER 'under_auditor_review';
+ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'under_reviewer_check'    AFTER 'returned_by_auditor';
+
+-- Commit the enum additions before using them in UPDATE statements.
+-- (In Supabase SQL Editor, each statement runs in its own transaction,
+-- so the above ALTERs are visible to the UPDATEs below.)
+
+-- ─── Step 2: Migrate existing claims data ───────────────────────
+
+-- under_consultant_review → under_supervisor_review
+UPDATE claims
+SET status = 'under_supervisor_review'
+WHERE status = 'under_consultant_review';
+
+-- returned_by_consultant → returned_by_supervisor
+UPDATE claims
+SET status = 'returned_by_supervisor'
+WHERE status = 'returned_by_consultant';
+
+-- under_admin_review → under_auditor_review
+-- (admin review maps to auditor review in the 5-stage workflow)
+UPDATE claims
+SET status = 'under_auditor_review'
+WHERE status = 'under_admin_review';
+
+-- returned_by_admin → returned_by_auditor
+UPDATE claims
+SET status = 'returned_by_auditor'
+WHERE status = 'returned_by_admin';
+
+-- ─── Step 3: Migrate claim_workflow audit trail ──────────────────
+
+UPDATE claim_workflow SET from_status = 'under_supervisor_review' WHERE from_status = 'under_consultant_review';
+UPDATE claim_workflow SET from_status = 'returned_by_supervisor'  WHERE from_status = 'returned_by_consultant';
+UPDATE claim_workflow SET from_status = 'under_auditor_review'    WHERE from_status = 'under_admin_review';
+UPDATE claim_workflow SET from_status = 'returned_by_auditor'     WHERE from_status = 'returned_by_admin';
+
+UPDATE claim_workflow SET to_status = 'under_supervisor_review' WHERE to_status = 'under_consultant_review';
+UPDATE claim_workflow SET to_status = 'returned_by_supervisor'  WHERE to_status = 'returned_by_consultant';
+UPDATE claim_workflow SET to_status = 'under_auditor_review'    WHERE to_status = 'under_admin_review';
+UPDATE claim_workflow SET to_status = 'returned_by_auditor'     WHERE to_status = 'returned_by_admin';
+
+-- ─── Step 4: Update change_order_status enum (if applicable) ────
+-- change_order_status uses same stage names for its workflow
+ALTER TYPE change_order_status ADD VALUE IF NOT EXISTS 'under_supervisor_review' AFTER 'submitted';
+ALTER TYPE change_order_status ADD VALUE IF NOT EXISTS 'under_auditor_review'    AFTER 'under_supervisor_review';
+ALTER TYPE change_order_status ADD VALUE IF NOT EXISTS 'under_reviewer_check'    AFTER 'under_auditor_review';
+
+UPDATE change_orders SET status = 'under_supervisor_review' WHERE status = 'under_consultant_review';
+UPDATE change_orders SET status = 'under_auditor_review'    WHERE status = 'under_admin_review';
+
+-- ─── Step 5: Update SLA monitor function (if exists) ─────────────
+-- Ensure supervisor_review_started_at trigger fires on new status name
+DO $$
+BEGIN
+  -- Drop and recreate the supervisor SLA trigger function if it exists
+  IF EXISTS (
+    SELECT 1 FROM pg_proc WHERE proname = 'set_supervisor_review_timestamp'
+  ) THEN
+    -- Function body will reference the new status name — recreate via
+    -- the companion migration 010_production_schema.sql if needed.
+    NULL;
+  END IF;
+END;
+$$;
+
+-- ─── Verification ────────────────────────────────────────────────
+-- Run after migration to confirm counts:
+SELECT status, COUNT(*) FROM claims GROUP BY status ORDER BY status;
+SELECT status, COUNT(*) FROM change_orders GROUP BY status ORDER BY status;
+
+-- Expected: zero rows with old status names (under_consultant_review,
+-- returned_by_consultant, under_admin_review, returned_by_admin)
+
+
+-- ════════════════════════════════════════════════════════════════════
+--  STEP 9  —  MIGRATION  —  seq=010b
 --  Source: legacy: migrations/010_user_contracts.sql
---  Reason: user_contracts (m2m)
+--  Reason: user_contracts (m2m) — additive on top of 001
 -- ════════════════════════════════════════════════════════════════════
 -- ============================================================
 -- Migration 010: User-Contract Associations (many-to-many)
@@ -2123,7 +3159,7 @@ ON CONFLICT (user_id, contract_id) DO NOTHING;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 8  —  MIGRATION  —  seq=011
+--  STEP 10  —  MIGRATION  —  seq=011
 --  Source: legacy: migrations/011_fix_rls_returned_statuses.sql
 --  Reason: RLS fix returned statuses
 -- ════════════════════════════════════════════════════════════════════
@@ -2160,7 +3196,7 @@ CREATE POLICY "claims_external_update_editable"
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 9  —  MIGRATION  —  seq=012
+--  STEP 11  —  MIGRATION  —  seq=012
 --  Source: legacy: migrations/012_fix_rls_workflow_roles.sql
 --  Reason: RLS fix workflow roles
 -- ════════════════════════════════════════════════════════════════════
@@ -2258,7 +3294,7 @@ SELECT policyname, cmd FROM pg_policies WHERE tablename = 'claims' ORDER BY poli
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 10  —  MIGRATION  —  seq=013
+--  STEP 12  —  MIGRATION  —  seq=013
 --  Source: legacy: migrations/013_fix_trigger_security_definer.sql
 --  Reason: trigger SECURITY DEFINER fix
 -- ════════════════════════════════════════════════════════════════════
@@ -2349,7 +3385,7 @@ SELECT 'trigger_fixed' AS result;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 11  —  MIGRATION  —  seq=014
+--  STEP 13  —  MIGRATION  —  seq=014
 --  Source: legacy: migrations/014_db_level_transition_guard.sql
 --  Reason: DB-level transition guard
 -- ════════════════════════════════════════════════════════════════════
@@ -2556,7 +3592,7 @@ $$;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 12  —  MIGRATION  —  seq=016
+--  STEP 14  —  MIGRATION  —  seq=016
 --  Source: legacy: migrations/016_update_contract_types.sql
 --  Reason: contract_type enum updates
 -- ════════════════════════════════════════════════════════════════════
@@ -2589,7 +3625,7 @@ ORDER BY contract_no;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 13  —  MIGRATION  —  seq=017
+--  STEP 15  —  MIGRATION  —  seq=017
 --  Source: legacy: migrations/017_fix_contracts_rls_user_contracts.sql
 --  Reason: RLS fix contracts/user_contracts join
 -- ════════════════════════════════════════════════════════════════════
@@ -2718,7 +3754,7 @@ ORDER BY tablename, policyname;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 14  —  MIGRATION  —  seq=019
+--  STEP 16  —  MIGRATION  —  seq=019
 --  Source: legacy: migrations/019_definitive_rls_scope_fix.sql
 --  Reason: definitive RLS scoping
 -- ════════════════════════════════════════════════════════════════════
@@ -3084,7 +4120,7 @@ WHERE tablename = 'contracts'
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 15  —  MIGRATION  —  seq=020
+--  STEP 17  —  MIGRATION  —  seq=020
 --  Source: legacy: migrations/020_fix_internal_role_policies.sql
 --  Reason: internal-role policy fixes
 -- ════════════════════════════════════════════════════════════════════
@@ -3277,7 +4313,7 @@ WHERE qual LIKE '%auditor%'
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 16  —  MIGRATION  —  seq=021
+--  STEP 18  —  MIGRATION  —  seq=021
 --  Source: legacy: migrations/021_sync_auth_bans_and_verify.sql
 --  Reason: auth bans sync
 -- ════════════════════════════════════════════════════════════════════
@@ -3431,7 +4467,7 @@ WHERE tablename IN ('contracts', 'claims')
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 17  —  MIGRATION  —  seq=022
+--  STEP 19  —  MIGRATION  —  seq=022
 --  Source: legacy: migrations/022_fix_profiles_recursion.sql
 --  Reason: profiles RLS recursion fix
 -- ════════════════════════════════════════════════════════════════════
@@ -3462,7 +4498,7 @@ CREATE POLICY "profiles_internal_select"
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 18  —  MIGRATION  —  seq=023
+--  STEP 20  —  MIGRATION  —  seq=023
 --  Source: legacy: migrations/023_fix_contract_scoping_leaks.sql
 --  Reason: plug contract-scoping leaks
 -- ════════════════════════════════════════════════════════════════════
@@ -3793,7 +4829,7 @@ WHERE qual LIKE '%external_user_id%';
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 19  —  MIGRATION  —  seq=024
+--  STEP 21  —  MIGRATION  —  seq=024
 --  Source: legacy: migrations/024_drop_contracts_auth_read_backdoor.sql
 --  Reason: remove auth-read backdoor on contracts
 -- ════════════════════════════════════════════════════════════════════
@@ -3954,7 +4990,7 @@ WHERE qual LIKE '%external_user_id%';
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 20  —  MIGRATION  —  seq=025
+--  STEP 22  —  MIGRATION  —  seq=025
 --  Source: legacy: migrations/025_contract_scoped_roles.sql
 --  Reason: introduce user_contract_roles
 -- ════════════════════════════════════════════════════════════════════
@@ -4513,7 +5549,7 @@ ORDER BY tablename, policyname;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 21  —  MIGRATION  —  seq=026
+--  STEP 23  —  MIGRATION  —  seq=026
 --  Source: legacy: migrations/026_rls_contract_scoped_roles.sql
 --  Reason: RLS for contract-scoped roles
 -- ════════════════════════════════════════════════════════════════════
@@ -5622,7 +6658,7 @@ COMMIT;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 22  —  MIGRATION  —  seq=027
+--  STEP 24  —  MIGRATION  —  seq=027
 --  Source: legacy: migrations/027_contract_role_browser_helpers.sql
 --  Reason: browser helpers for contract roles
 -- ════════════════════════════════════════════════════════════════════
@@ -5784,7 +6820,7 @@ ORDER BY policyname;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 23  —  MIGRATION  —  seq=028
+--  STEP 25  —  MIGRATION  —  seq=028
 --  Source: legacy: migrations/028_add_last_transition_at.sql
 --  Reason: last_transition_at column
 -- ════════════════════════════════════════════════════════════════════
@@ -5851,7 +6887,7 @@ ALTER COLUMN last_transition_at SET DEFAULT NOW();
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 24  —  MIGRATION  —  seq=029
+--  STEP 26  —  MIGRATION  —  seq=029
 --  Source: legacy: migrations/029_contractor_withdraw_action.sql
 --  Reason: contractor withdraw action
 -- ════════════════════════════════════════════════════════════════════
@@ -5914,7 +6950,7 @@ WHERE conname = 'claim_workflow_action_check';
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 25  —  MIGRATION  —  seq=030
+--  STEP 27  —  MIGRATION  —  seq=030
 --  Source: legacy: migrations/030_completion_certificate_and_cancel.sql
 --  Reason: completion-cert + cancel actions
 -- ════════════════════════════════════════════════════════════════════
@@ -6039,7 +7075,7 @@ WHERE conname = 'claim_workflow_action_check';
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 26  —  MIGRATION  —  seq=031
+--  STEP 28  —  MIGRATION  —  seq=031
 --  Source: legacy: migrations/031_atomic_claim_submission.sql
 --  Reason: predecessor atomic-submission RPC
 -- ════════════════════════════════════════════════════════════════════
@@ -6454,7 +7490,7 @@ $$;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 27  —  MIGRATION  —  seq=031b
+--  STEP 29  —  MIGRATION  —  seq=031b
 --  Source: legacy: migrations/031b_fix_audit_logs_columns.sql
 --  Reason: audit_logs column fix
 -- ════════════════════════════════════════════════════════════════════
@@ -6652,7 +7688,7 @@ $$;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 28  —  MIGRATION  —  seq=033
+--  STEP 30  —  MIGRATION  —  seq=033
 --  Source: legacy: migrations/033_fix_document_type_enum.sql
 --  Reason: document_type enum fix
 -- ════════════════════════════════════════════════════════════════════
@@ -6680,7 +7716,7 @@ ORDER BY enumsortorder;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 29  —  MIGRATION  —  seq=034
+--  STEP 31  —  MIGRATION  —  seq=034
 --  Source: legacy: migrations/034_audit_helper_function.sql
 --  Reason: audit helper function
 -- ════════════════════════════════════════════════════════════════════
@@ -6810,7 +7846,7 @@ DELETE FROM audit_logs WHERE entity_type = 'test';
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 30  —  MIGRATION  —  seq=035
+--  STEP 32  —  MIGRATION  —  seq=035
 --  Source: legacy: migrations/035_block_submitted_persist.sql
 --  Reason: block submitted persistence
 -- ════════════════════════════════════════════════════════════════════
@@ -6882,7 +7918,7 @@ END $$;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 31  —  MIGRATION  —  seq=040
+--  STEP 33  —  MIGRATION  —  seq=040
 --  Source: current: migrations/040_flexible_approvers_and_import.sql
 --  Reason: flexible approvers (newer)
 -- ════════════════════════════════════════════════════════════════════
@@ -7077,7 +8113,7 @@ CREATE POLICY "permission_requests_update" ON permission_requests
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 32  —  MIGRATION  —  seq=041
+--  STEP 34  —  MIGRATION  —  seq=041
 --  Source: current: migrations/041_final_approver_role.sql
 --  Reason: final_approver role (newer)
 -- ════════════════════════════════════════════════════════════════════
@@ -7194,7 +8230,7 @@ COMMIT;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 33  —  MIGRATION  —  seq=042
+--  STEP 35  —  MIGRATION  —  seq=042
 --  Source: legacy: migrations/042_extend_enums_for_template_v7.sql
 --  Reason: enum extension (full version)
 -- ════════════════════════════════════════════════════════════════════
@@ -7275,7 +8311,7 @@ WHERE enumtypid = 'contract_status'::regtype;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 34  —  MIGRATION  —  seq=043
+--  STEP 36  —  MIGRATION  —  seq=043
 --  Source: legacy: migrations/043_data_model_hardening_SAFE.sql
 --  Reason: D2 hardening SAFE variant
 -- ════════════════════════════════════════════════════════════════════
@@ -7332,7 +8368,7 @@ WHERE schemaname = 'public'
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 35  —  MIGRATION  —  seq=044
+--  STEP 37  —  MIGRATION  —  seq=044
 --  Source: current: migrations/044_imports_governance.sql
 --  Reason: imports governance (newer)
 -- ════════════════════════════════════════════════════════════════════
@@ -7487,7 +8523,7 @@ SELECT 'Migration 044 applied' AS status,
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 36  —  MIGRATION  —  seq=045
+--  STEP 38  —  MIGRATION  —  seq=045
 --  Source: legacy: migrations/045_contract_role_multi_assignment.sql
 --  Reason: 3-tuple unique invariant
 -- ════════════════════════════════════════════════════════════════════
@@ -7822,7 +8858,7 @@ COMMIT;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 37  —  MIGRATION  —  seq=046
+--  STEP 39  —  MIGRATION  —  seq=046
 --  Source: current: migrations/046_quality_and_pm_stages.sql
 --  Reason: quality + project_manager workflow stages
 -- ════════════════════════════════════════════════════════════════════
@@ -8052,7 +9088,7 @@ COMMIT;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 38  —  MIGRATION  —  seq=047
+--  STEP 40  —  MIGRATION  —  seq=047
 --  Source: current: migrations/047_claim_kind_and_number.sql
 --  Reason: claim_kind, claim_number, partial unique
 -- ════════════════════════════════════════════════════════════════════
@@ -8393,7 +9429,7 @@ COMMIT;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 39  —  MIGRATION  —  seq=048
+--  STEP 41  —  MIGRATION  —  seq=048
 --  Source: current: migrations/048_create_claim_with_items_atomic.sql
 --  Reason: atomic create RPC
 -- ════════════════════════════════════════════════════════════════════
@@ -8819,7 +9855,7 @@ COMMIT;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 40  —  MIGRATION  —  seq=049
+--  STEP 42  —  MIGRATION  —  seq=049
 --  Source: current: migrations/049_fix_claim_rpc_item_no_cast.sql
 --  Reason: RPC item_no cast fix
 -- ════════════════════════════════════════════════════════════════════
@@ -9354,7 +10390,7 @@ COMMIT;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 41  —  MIGRATION  —  seq=050
+--  STEP 43  —  MIGRATION  —  seq=050
 --  Source: current: migrations/050_fix_claim_rpc_claim_type_cast.sql
 --  Reason: RPC claim_type cast removal
 -- ════════════════════════════════════════════════════════════════════
@@ -9971,7 +11007,7 @@ COMMIT;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 42  —  SEED  —  seq=s001
+--  STEP 44  —  SEED  —  seq=s001
 --  Source: legacy: seeds/001_seed_profiles.sql
 --  Reason: profiles bootstrap
 -- ════════════════════════════════════════════════════════════════════
@@ -10301,7 +11337,7 @@ ORDER BY
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 43  —  SEED  —  seq=s002
+--  STEP 45  —  SEED  —  seq=s002
 --  Source: legacy: seeds/002_seed_contracts.sql
 --  Reason: contracts incl. CMH_01-C01
 -- ════════════════════════════════════════════════════════════════════
@@ -10821,7 +11857,7 @@ ORDER BY c.start_date;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 44  —  SEED  —  seq=s003
+--  STEP 46  —  SEED  —  seq=s003
 --  Source: legacy: seeds/003_seed_convera_users.sql
 --  Reason: official MoMaH users
 -- ════════════════════════════════════════════════════════════════════
@@ -10989,7 +12025,7 @@ ORDER BY id;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 45  —  SEED  —  seq=s004
+--  STEP 47  —  SEED  —  seq=s004
 --  Source: legacy: seeds/004_seed_supabase_auth_users.sql
 --  Reason: auth.users bootstrap
 -- ════════════════════════════════════════════════════════════════════
@@ -11193,7 +12229,7 @@ ORDER BY id;
 
 
 -- ════════════════════════════════════════════════════════════════════
---  STEP 46  —  SEED  —  seq=s005
+--  STEP 48  —  SEED  —  seq=s005
 --  Source: current: seeds/005_seed_test_users_cmh.sql
 --  Reason: IAM-3 aligned test users
 -- ════════════════════════════════════════════════════════════════════
