@@ -1,11 +1,11 @@
 step,sequence,source_tree,source_file,kind,status,reason
 ,001,legacy,migrations/001_base_schema.sql,SKIPPED,not-applied,REDUNDANT — superseded by 010_production_schema v2.0 snapshot
-,003,legacy,migrations/003_change_orders_and_hardening.sql,SKIPPED,not-applied,REDUNDANT with 010 (010 already creates change_orders + change_order_boq_items + change_order_workflow). The only missing piece — change_order_staff_items — is added as synthetic patch below
+,003,legacy,migrations/003_change_orders_and_hardening.sql,SKIPPED,not-applied,REDUNDANT with 010 (only piece 010 misses — change_order_staff_items — added as synthetic patch below)
 ,004,legacy,migrations/004_contract_templates_and_progress_models.sql,SKIPPED,not-applied,REDUNDANT — 010 already creates contract_boq_templates + contract_staff_templates
 ,009,legacy,migrations/009_rename_claim_statuses.sql,SKIPPED,not-applied,REDUNDANT — 010 v2.0 enum already uses the renamed claim statuses
 ,015,legacy,migrations/015_fix_contract_231001101771_templates.sql,SKIPPED,not-applied,PRODUCTION-ONLY data fix
 ,018,legacy,migrations/018_revert_staff_grade3_rows.sql,SKIPPED,not-applied,PRODUCTION-ONLY data revert
-1,foundation,legacy,migrations/010_production_schema.sql,MIGRATION,included,foundational v2.0 snapshot — REORDERED to apply first  [PATCHED 2026-05-07: CONSTRAINT … AS → CHECK]
+1,foundation,legacy,migrations/010_production_schema.sql,MIGRATION,included,foundational v2.0 snapshot — REORDERED to apply first  [PATCHED 2026-05-07: CONSTRAINT…AS→CHECK + GENERATED…SELECT→denormalized progress_model]
 2,synthetic,patch,change_order_staff_items_patch,PATCH,included,synthetic patch: change_order_staff_items + RLS (extracted from 003)
 3,002,legacy,migrations/002_step0_fixes.sql,MIGRATION,included,step 0 fixes + storage buckets
 4,006,legacy,migrations/006_convera_users_otp.sql,MIGRATION,included,CONVERA_USERS + convera_otp tables

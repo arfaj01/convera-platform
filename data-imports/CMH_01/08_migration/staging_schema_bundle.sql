@@ -1,19 +1,21 @@
 -- ════════════════════════════════════════════════════════════════════
---  CMH_01 — STAGING Schema Bundle  v2.1 (constraint-syntax fix)
+--  CMH_01 — STAGING Schema Bundle  v2.2 (generated-column subquery fix)
 --  Authored: 2026-05-07
 --
 --  Target:    STAGING ONLY  —  project ref  jrqkzwacerdudmeacvar
 --  FORBIDDEN: production project ref  ngwxlockzkjpmzuvgakx
 --
---  v2.1 changes vs v2 (commit 17c0ec1):
---    • Source fix to 010_production_schema.sql — replaced 2 invalid
---      `CONSTRAINT name AS (expr)` clauses with valid `CONSTRAINT name
---      CHECK (expr)` (PG error 42601 at line 144 and 559 of source).
---    • No structural change — same skip list, same apply order, same
---      synthetic patch.
+--  v2.2 changes vs v2.1 (commit 3e9ff65):
+--    • Source fix to 010_production_schema.sql — replaced two GENERATED
+--      ALWAYS AS expressions on claim_boq_items.period_amount and
+--      claim_boq_items.after_perf_amount that contained subqueries
+--      (PG error 0A000) with a denormalized progress_model column on the
+--      same row. DEFAULT 'count' preserves the original CASE ELSE branch.
+--    • The platform RPC (Migration 048) is responsible for setting
+--      progress_model from contract_boq_templates at insert time.
 --
 --  Operator instructions:
---    1. Confirm staging tab (URL contains 'jrqkzwacerdudmeacvar').
+--    1. Verify staging is clean (run pre-check; expect public_table_count = 0).
 --    2. Run pre-flight guard (lines 36–46) alone first.
 --    3. Apply each subsequent STEP in order; stop on first error.
 --    4. After all STEPs succeed, run staging_schema_verification.sql.
@@ -38,7 +40,7 @@ END $$;
 
 
 -- ─── SKIPPED — 003 (legacy) — 003_change_orders_and_hardening.sql ───
--- Reason: REDUNDANT with 010 (010 already creates change_orders + change_order_boq_items + change_order_workflow). The only missing piece — change_order_staff_items — is added as synthetic patch below
+-- Reason: REDUNDANT with 010 (only piece 010 misses — change_order_staff_items — added as synthetic patch below)
 -- (skipped)
 
 
@@ -65,7 +67,7 @@ END $$;
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 1  —  MIGRATION  —  seq=foundation
 --  Source: legacy: migrations/010_production_schema.sql
---  Reason: foundational v2.0 snapshot — REORDERED to apply first  [PATCHED 2026-05-07: CONSTRAINT … AS → CHECK]
+--  Reason: foundational v2.0 snapshot — REORDERED to apply first  [PATCHED 2026-05-07: CONSTRAINT…AS→CHECK + GENERATED…SELECT→denormalized progress_model]
 -- ════════════════════════════════════════════════════════════════════
 -- ============================================================================
 -- CONVERA — Production PostgreSQL Schema
@@ -383,13 +385,22 @@ CREATE TABLE claim_boq_items (
   prev_cumulative_qty NUMERIC(12,4) DEFAULT 0.00,  -- Progress from prior claims
   curr_progress NUMERIC(12,4) NOT NULL,             -- This claim's progress
 
+  -- Denormalized progress model (PATCHED 2026-05-07)
+  -- PostgreSQL forbids subqueries inside GENERATED ALWAYS AS expressions
+  -- (error 0A000), so progress_model must be stored locally on the row.
+  -- The platform RPC (create_claim_with_items_atomic, Migration 048) is
+  -- responsible for copying the value from contract_boq_templates at insert.
+  -- DEFAULT 'count' matches the ELSE branch of the original CASE expression
+  -- so legacy inserts that do not set this column produce the same result.
+  progress_model boq_progress_model NOT NULL DEFAULT 'count',
+
   -- Calculated amounts
   unit_price NUMERIC(15,2) NOT NULL,
   period_amount NUMERIC(15,2) GENERATED ALWAYS AS (
     CASE
-      WHEN (SELECT progress_model FROM contract_boq_templates WHERE id = template_item_id) = 'count'
+      WHEN progress_model = 'count'
         THEN curr_progress * unit_price
-      WHEN (SELECT progress_model FROM contract_boq_templates WHERE id = template_item_id) = 'percentage'
+      WHEN progress_model = 'percentage'
         THEN (curr_progress / 100.0) * unit_price
       ELSE curr_progress * unit_price  -- monthly_lump_sum
     END
@@ -398,9 +409,9 @@ CREATE TABLE claim_boq_items (
   performance_pct NUMERIC(5,2) NOT NULL DEFAULT 100.00,
   after_perf_amount NUMERIC(15,2) GENERATED ALWAYS AS (
     (CASE
-      WHEN (SELECT progress_model FROM contract_boq_templates WHERE id = template_item_id) = 'count'
+      WHEN progress_model = 'count'
         THEN curr_progress * unit_price
-      WHEN (SELECT progress_model FROM contract_boq_templates WHERE id = template_item_id) = 'percentage'
+      WHEN progress_model = 'percentage'
         THEN (curr_progress / 100.0) * unit_price
       ELSE curr_progress * unit_price
     END) * performance_pct / 100.0
@@ -1320,9 +1331,7 @@ COMMENT ON FUNCTION fn_check_change_order_limit() IS 'Validates that change orde
 -- ════════════════════════════════════════════════════════════════════
 -- ─── SYNTHETIC PATCH ───────────────────────────────────────────────
 -- change_order_staff_items table — the only object in legacy 003 that
--- 010_production_schema.sql does NOT create. Section 26 (RLS for
--- contract-scoped roles) references this table, so we add it here as
--- an additive patch on top of the 010 foundation.
+-- 010_production_schema.sql does NOT create.
 -- ───────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS change_order_staff_items (
@@ -1350,40 +1359,35 @@ DROP POLICY IF EXISTS "co_staff_external_insert"  ON change_order_staff_items;
 DROP POLICY IF EXISTS "co_staff_external_update"  ON change_order_staff_items;
 DROP POLICY IF EXISTS "co_staff_external_delete"  ON change_order_staff_items;
 
-CREATE POLICY "co_staff_internal_all"
-  ON change_order_staff_items FOR ALL USING (is_internal());
+CREATE POLICY "co_staff_internal_all" ON change_order_staff_items FOR ALL USING (is_internal());
 
-CREATE POLICY "co_staff_external_select"
-  ON change_order_staff_items FOR SELECT
-  USING (change_order_id IN (
-    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-    WHERE ct.external_user_id = auth.uid()
-  ));
+CREATE POLICY "co_staff_external_select" ON change_order_staff_items FOR SELECT
+USING (change_order_id IN (
+  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
+  WHERE ct.external_user_id = auth.uid()
+));
 
-CREATE POLICY "co_staff_external_insert"
-  ON change_order_staff_items FOR INSERT
-  WITH CHECK (change_order_id IN (
-    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-    WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
-  ));
+CREATE POLICY "co_staff_external_insert" ON change_order_staff_items FOR INSERT
+WITH CHECK (change_order_id IN (
+  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
+  WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
+));
 
-CREATE POLICY "co_staff_external_update"
-  ON change_order_staff_items FOR UPDATE
-  USING (change_order_id IN (
-    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-    WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
-  ))
-  WITH CHECK (change_order_id IN (
-    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-    WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
-  ));
+CREATE POLICY "co_staff_external_update" ON change_order_staff_items FOR UPDATE
+USING (change_order_id IN (
+  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
+  WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
+))
+WITH CHECK (change_order_id IN (
+  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
+  WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
+));
 
-CREATE POLICY "co_staff_external_delete"
-  ON change_order_staff_items FOR DELETE
-  USING (change_order_id IN (
-    SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
-    WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
-  ));
+CREATE POLICY "co_staff_external_delete" ON change_order_staff_items FOR DELETE
+USING (change_order_id IN (
+  SELECT co.id FROM change_orders co JOIN contracts ct ON co.contract_id = ct.id
+  WHERE ct.external_user_id = auth.uid() AND co.status = 'draft'
+));
 
 
 -- ════════════════════════════════════════════════════════════════════
