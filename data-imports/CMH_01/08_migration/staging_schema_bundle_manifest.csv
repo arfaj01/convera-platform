@@ -1,0 +1,52 @@
+sequence,source_tree,source_file,included_or_skipped,reason,target_phase,risk_notes
+001,legacy,migrations/001_base_schema.sql,included,foundational schema,core,low
+002,legacy,migrations/002_step0_fixes.sql,included,post-001 fixes,core,low
+003,legacy,migrations/003_change_orders_and_hardening.sql,included,change-orders system + hardening,core,low
+004,legacy,migrations/004_contract_templates_and_progress_models.sql,included,BOQ + staff template tables,core,low
+006,legacy,migrations/006_convera_users_otp.sql,included,CONVERA_USERS table (OTP),core,low
+007,legacy,migrations/007_contract_amendments_enhancement.sql,included,contract amendments,core,low
+008,legacy,migrations/008_invoice_attachment_governance.sql,included,invoice attachment rules,core,low
+009,legacy,migrations/009_rename_claim_statuses.sql,included,rename claim status enum values,core,low
+010a,legacy,migrations/010_production_schema.sql,included,foundational; apply BEFORE 010b,core,medium
+010b,legacy,migrations/010_user_contracts.sql,included,m2m user_contracts; apply AFTER 010a,core,low
+011,legacy,migrations/011_fix_rls_returned_statuses.sql,included,RLS fix returned statuses,core,low
+012,legacy,migrations/012_fix_rls_workflow_roles.sql,included,RLS fix workflow roles,core,low
+013,legacy,migrations/013_fix_trigger_security_definer.sql,included,trigger SECURITY DEFINER fix,core,low
+014,legacy,migrations/014_db_level_transition_guard.sql,included,DB-level transition guard,core,low
+015,legacy,migrations/015_fix_contract_231001101771_templates.sql,SKIPPED,production-specific contract data fix,skip,high
+016,legacy,migrations/016_update_contract_types.sql,included,contract_type enum updates,core,low
+017,legacy,migrations/017_fix_contracts_rls_user_contracts.sql,included,RLS fix contracts/user_contracts join,core,low
+018,legacy,migrations/018_revert_staff_grade3_rows.sql,SKIPPED,production data revert,skip,high
+019,legacy,migrations/019_definitive_rls_scope_fix.sql,included,definitive RLS scoping,core,low
+020,legacy,migrations/020_fix_internal_role_policies.sql,included,internal-role policy fixes,core,low
+021,legacy,migrations/021_sync_auth_bans_and_verify.sql,included,auth bans sync (no-op on fresh staging),core,low
+022,legacy,migrations/022_fix_profiles_recursion.sql,included,profiles RLS recursion fix,core,low
+023,legacy,migrations/023_fix_contract_scoping_leaks.sql,included,plug contract-scoping leaks,core,low
+024,legacy,migrations/024_drop_contracts_auth_read_backdoor.sql,included,remove auth-read backdoor on contracts,core,low
+025,legacy,migrations/025_contract_scoped_roles.sql,included,introduce user_contract_roles,core,low
+026,legacy,migrations/026_rls_contract_scoped_roles.sql,included,RLS for contract-scoped roles,core,low
+027,legacy,migrations/027_contract_role_browser_helpers.sql,included,browser helpers for contract roles,core,low
+028,legacy,migrations/028_add_last_transition_at.sql,included,last_transition_at column,core,low
+029,legacy,migrations/029_contractor_withdraw_action.sql,included,contractor withdraw action,core,low
+030,legacy,migrations/030_completion_certificate_and_cancel.sql,included,completion-cert + cancel actions,core,low
+031,legacy,migrations/031_atomic_claim_submission.sql,included,predecessor atomic-submission RPC,core,low
+031b,legacy,migrations/031b_fix_audit_logs_columns.sql,included,audit_logs column fix,core,low
+033,legacy,migrations/033_fix_document_type_enum.sql,included,document_type enum fix,core,low
+034,legacy,migrations/034_audit_helper_function.sql,included,audit helper function,core,low
+035,legacy,migrations/035_block_submitted_persist.sql,included,block submitted persistence,core,low
+040,current,migrations/040_flexible_approvers_and_import.sql,included,newer than legacy — flexible approvers,core,low
+041,current,migrations/041_final_approver_role.sql,included,newer than legacy — final_approver role,core,low
+042,legacy,migrations/042_extend_enums_for_template_v7.sql,included,enum extension (full version),core,low
+043,legacy,migrations/043_data_model_hardening_SAFE.sql,included,D2 hardening SAFE variant,core,low
+044,current,migrations/044_imports_governance.sql,included,newer than legacy — imports governance,core,low
+045,legacy,migrations/045_contract_role_multi_assignment.sql,included,3-tuple unique invariant,core,low
+046,current,migrations/046_quality_and_pm_stages.sql,included,quality + project_manager workflow stages,core,low
+047,current,migrations/047_claim_kind_and_number.sql,included,"claim_kind, claim_number, partial unique",core,low
+048,current,migrations/048_create_claim_with_items_atomic.sql,included,atomic create RPC,core,low
+049,current,migrations/049_fix_claim_rpc_item_no_cast.sql,included,RPC item_no cast fix,core,low
+050,current,migrations/050_fix_claim_rpc_claim_type_cast.sql,included,RPC claim_type cast removal,core,low
+s001,legacy,seeds/001_seed_profiles.sql,included,profiles bootstrap,seed,low
+s002,legacy,seeds/002_seed_contracts.sql,included,contracts incl. CMH_01-C01,seed,low
+s003,legacy,seeds/003_seed_convera_users.sql,included,official MoMaH users,seed,low
+s004,legacy,seeds/004_seed_supabase_auth_users.sql,included,auth.users bootstrap,seed,medium
+s005,current,seeds/005_seed_test_users_cmh.sql,included,IAM-3 aligned test users,seed,low
