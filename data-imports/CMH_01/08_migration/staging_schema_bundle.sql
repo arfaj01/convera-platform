@@ -9775,7 +9775,6 @@ COMMIT;
 SELECT 'Migration 044 applied' AS status,
   (SELECT COUNT(*) FROM information_schema.tables
    WHERE table_schema = 'public' AND table_name IN ('imports', 'import_errors')) AS tables_created;
-                                    
 
 -- ════════════════════════════════════════════════════════════════════
 --  MIGRATION 045 (legacy)  —  migrations/045_contract_role_multi_assignment.sql
