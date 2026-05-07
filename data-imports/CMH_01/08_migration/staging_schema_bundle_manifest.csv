@@ -1,16 +1,16 @@
 step,sequence,source_tree,source_file,kind,status,reason
-,010a,legacy,migrations/010_production_schema.sql,SKIPPED,not-applied,"PARALLEL UNIVERSE — v2.0 standalone snapshot that uses director_id + contract_assignments instead of contracts.external_user_id. Sections 003, 004, 010_user_contracts, 019, 023, 024, 025, 026 (and seed 002) all reference contracts.external_user_id which 010_production_schema does NOT create. Skipping 010 keeps the migration chain self-consistent on the 001 foundation."
-,015,legacy,migrations/015_fix_contract_231001101771_templates.sql,SKIPPED,not-applied,PRODUCTION-ONLY data fix for a real-life contract
+,010a,legacy,migrations/010_production_schema.sql,SKIPPED,not-applied,PARALLEL UNIVERSE — v2.0 standalone snapshot using a different access model. Not adopted by 011-035 chain.
+,015,legacy,migrations/015_fix_contract_231001101771_templates.sql,SKIPPED,not-applied,PRODUCTION-ONLY data fix
 ,018,legacy,migrations/018_revert_staff_grade3_rows.sql,SKIPPED,not-applied,PRODUCTION-ONLY data revert
-1,001,legacy,migrations/001_base_schema.sql,MIGRATION,included,foundational base schema (March 16) — establishes profiles/contracts/claims/...
+1,001,legacy,migrations/001_base_schema.sql,MIGRATION,included,foundational base schema
 2,002,legacy,migrations/002_step0_fixes.sql,MIGRATION,included,step 0 fixes + storage buckets
-3,003,legacy,migrations/003_change_orders_and_hardening.sql,MIGRATION,included,change_orders + change_order_boq_items + change_order_staff_items + workflow
-4,004,legacy,migrations/004_contract_templates_and_progress_models.sql,MIGRATION,included,contract_boq_templates + contract_staff_templates + boq_progress_model enum
-5,006,legacy,migrations/006_convera_users_otp.sql,MIGRATION,included,CONVERA_USERS + convera_otp tables
-6,007,legacy,migrations/007_contract_amendments_enhancement.sql,MIGRATION,included,contract amendments enhancement
+3,003,legacy,migrations/003_change_orders_and_hardening.sql,MIGRATION,included,change_orders family
+4,004,legacy,migrations/004_contract_templates_and_progress_models.sql,MIGRATION,included,contract templates + boq_progress_model
+5,006,legacy,migrations/006_convera_users_otp.sql,MIGRATION,included,CONVERA_USERS + OTP
+6,007,legacy,migrations/007_contract_amendments_enhancement.sql,MIGRATION,included,amendments enhancement
 7,008,legacy,migrations/008_invoice_attachment_governance.sql,MIGRATION,included,invoice attachment governance
-8,009,legacy,migrations/009_rename_claim_statuses.sql,MIGRATION,included,rename claim status enum values
-9,010b,legacy,migrations/010_user_contracts.sql,MIGRATION,included,user_contracts (m2m) — additive on top of 001
+8,009,patch,migrations/009_rename_claim_statuses.sql,MIGRATION,included,[PATCHED v2.4] enum-only — data UPDATEs stripped (no rows to update on fresh staging; avoids PG 55P04 + 22P02)
+9,010b,legacy,migrations/010_user_contracts.sql,MIGRATION,included,user_contracts (m2m)
 10,011,legacy,migrations/011_fix_rls_returned_statuses.sql,MIGRATION,included,RLS fix returned statuses
 11,012,legacy,migrations/012_fix_rls_workflow_roles.sql,MIGRATION,included,RLS fix workflow roles
 12,013,legacy,migrations/013_fix_trigger_security_definer.sql,MIGRATION,included,trigger SECURITY DEFINER fix

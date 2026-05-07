@@ -1,23 +1,22 @@
 -- ════════════════════════════════════════════════════════════════════
---  CMH_01 — STAGING Schema Bundle  v2.3 (true Path A)
+--  CMH_01 — STAGING Schema Bundle  v2.4 (enum transaction-safety fix)
 --  Authored: 2026-05-07
 --
 --  Target:    STAGING ONLY  —  project ref  jrqkzwacerdudmeacvar
 --  FORBIDDEN: production project ref  ngwxlockzkjpmzuvgakx
 --
---  v2.3 changes vs v2.2 (commit 61428a9):
---    • Reverted Path B. The earlier hypothesis that 010_production_schema
---      was an additive consolidation snapshot was wrong: that file uses a
---      different access model (director_id + contract_assignments) that
---      the rest of the migration chain does NOT use. Sections 003, 004,
---      010_user_contracts, 019, 023, 024, 025, 026 (and seed 002) all
---      reference contracts.external_user_id, which only 001 creates.
---    • TRUE Path A — keep the 001-009 evolution chain as the foundation.
---      Skip ONLY 010_production_schema.sql (parallel-universe variant).
---    • Removed the synthetic change_order_staff_items patch (003 creates
---      it, plus change_order_boq_items, change_order_workflow, etc.).
---    • Reordered to original numeric sequence — no relocation of
---      002/006/007/008.
+--  v2.4 changes vs v2.3 (commit fe05a19):
+--    • Section 009 (009_rename_claim_statuses.sql) is BUNDLE-PATCHED:
+--      data UPDATE statements stripped (no-ops on fresh staging; would
+--      otherwise trigger PG 55P04 from same-transaction enum-add+use AND
+--      PG 22P02 from comparing change_orders.status to enum labels that
+--      change_order_status never had). The ALTER TYPE ADD VALUE
+--      statements are kept.
+--    • Sections 045 + 046 audited: their post-ADD-VALUE references to
+--      new enum labels appear only inside pg_enum-lookup contexts
+--      (string comparisons against pg_enum.enumlabel, not enum casts) —
+--      no 55P04 risk. Left as-is.
+--    • All other sections unchanged from v2.3.
 --
 --  Operator instructions:
 --    1. Verify staging is clean (run pre-check; expect public_table_count = 0).
@@ -40,12 +39,12 @@ END $$;
 
 
 -- ─── SKIPPED — 010a (legacy) — 010_production_schema.sql ───
--- Reason: PARALLEL UNIVERSE — v2.0 standalone snapshot that uses director_id + contract_assignments instead of contracts.external_user_id. Sections 003, 004, 010_user_contracts, 019, 023, 024, 025, 026 (and seed 002) all reference contracts.external_user_id which 010_production_schema does NOT create. Skipping 010 keeps the migration chain self-consistent on the 001 foundation.
+-- Reason: PARALLEL UNIVERSE — v2.0 standalone snapshot using a different access model. Not adopted by 011-035 chain.
 -- (skipped)
 
 
 -- ─── SKIPPED — 015 (legacy) — 015_fix_contract_231001101771_templates.sql ───
--- Reason: PRODUCTION-ONLY data fix for a real-life contract
+-- Reason: PRODUCTION-ONLY data fix
 -- (skipped)
 
 
@@ -57,7 +56,7 @@ END $$;
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 1  —  MIGRATION  —  seq=001
 --  Source: legacy: migrations/001_base_schema.sql
---  Reason: foundational base schema (March 16) — establishes profiles/contracts/claims/...
+--  Reason: foundational base schema
 -- ════════════════════════════════════════════════════════════════════
 -- ═══════════════════════════════════════════════════════════════════
 --  CONVERA — Base Schema (Bootstrap Safe)
@@ -1337,7 +1336,7 @@ CREATE POLICY "storage_avatars_upload_own"
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 3  —  MIGRATION  —  seq=003
 --  Source: legacy: migrations/003_change_orders_and_hardening.sql
---  Reason: change_orders + change_order_boq_items + change_order_staff_items + workflow
+--  Reason: change_orders family
 -- ════════════════════════════════════════════════════════════════════
 -- ═══════════════════════════════════════════════════════════════════
 --  CONVERA — Change Orders & Hardening
@@ -2045,7 +2044,7 @@ CREATE POLICY "co_workflow_external_insert"
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 4  —  MIGRATION  —  seq=004
 --  Source: legacy: migrations/004_contract_templates_and_progress_models.sql
---  Reason: contract_boq_templates + contract_staff_templates + boq_progress_model enum
+--  Reason: contract templates + boq_progress_model
 -- ════════════════════════════════════════════════════════════════════
 -- ═══════════════════════════════════════════════════════════════════
 --  CONVERA — Contract Templates & Progress Models
@@ -2516,7 +2515,7 @@ CREATE POLICY "staff_tmpl_external_select"
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 5  —  MIGRATION  —  seq=006
 --  Source: legacy: migrations/006_convera_users_otp.sql
---  Reason: CONVERA_USERS + convera_otp tables
+--  Reason: CONVERA_USERS + OTP
 -- ════════════════════════════════════════════════════════════════════
 -- ═══════════════════════════════════════════════════════════════════
 --  CONVERA — Prototype Auth Tables (convera_users + convera_otp)
@@ -2640,7 +2639,7 @@ CREATE TRIGGER trg_convera_users_updated_at
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 6  —  MIGRATION  —  seq=007
 --  Source: legacy: migrations/007_contract_amendments_enhancement.sql
---  Reason: contract amendments enhancement
+--  Reason: amendments enhancement
 -- ════════════════════════════════════════════════════════════════════
 -- ═══════════════════════════════════════════════════════════════════
 --  CONVERA — Migration 007: Contract Amendments Enhancement
@@ -2965,27 +2964,29 @@ WHERE tablename = 'documents'
 
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 8  —  MIGRATION  —  seq=009
---  Source: legacy: migrations/009_rename_claim_statuses.sql
---  Reason: rename claim status enum values
+--  Source: [PATCHED] legacy: migrations/009_rename_claim_statuses.sql
+--  Reason: [PATCHED v2.4] enum-only — data UPDATEs stripped (no rows to update on fresh staging; avoids PG 55P04 + 22P02)
 -- ════════════════════════════════════════════════════════════════════
--- =============================================================
--- Migration 009: Rename claim_status enum from 4-stage to 5-stage
--- CONVERA Platform — 5-stage workflow alignment
+-- ════════════════════════════════════════════════════════════════════
+-- Migration 009 — claim_status / change_order_status enum extension
+-- BUNDLE-PATCHED 2026-05-07 for safe fresh-staging apply.
 --
--- Old (4-stage):  under_consultant_review → returned_by_consultant
---                 under_admin_review      → returned_by_admin
---
--- New (5-stage):  under_supervisor_review → returned_by_supervisor
---                 under_auditor_review    → returned_by_auditor
---                 under_reviewer_check    (new — no old equivalent)
---
--- Run in Supabase SQL Editor BEFORE deploying updated frontend code.
--- Safe to run multiple times (ADD VALUE IF NOT EXISTS).
--- =============================================================
-
--- ─── Step 1: Add all new enum values ────────────────────────────
--- (PostgreSQL does not support removing enum values; old values remain
--- but are no longer used by the application after data migration.)
+-- Original file (CONVERA/SQL/migrations/009_rename_claim_statuses.sql) also
+-- runs UPDATE statements that map old workflow status values to new ones.
+-- Two reasons those UPDATEs are stripped from the staging bundle:
+--   • PG 55P04: a freshly-added enum value cannot be used in the same
+--     transaction. Supabase SQL Editor wraps a Run-button submission in
+--     one transaction, so ALTER TYPE ADD VALUE + UPDATE-using-new-value
+--     fails on the UPDATE.
+--   • PG 22P02: the legacy file references stale labels
+--     (under_consultant_review, returned_by_consultant, under_admin_review,
+--     returned_by_admin) that were never added to change_order_status —
+--     so even comparing change_orders.status against those literals fails
+--     parse-time, regardless of whether any rows match.
+-- On fresh staging there are no claims / claim_workflow / change_orders
+-- rows yet, so the data UPDATEs are no-ops anyway. Production already ran
+-- the full migration months ago against real data.
+-- ════════════════════════════════════════════════════════════════════
 
 ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'under_supervisor_review' AFTER 'submitted';
 ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'returned_by_supervisor'  AFTER 'under_supervisor_review';
@@ -2993,82 +2994,15 @@ ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'under_auditor_review'    AFTER 
 ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'returned_by_auditor'     AFTER 'under_auditor_review';
 ALTER TYPE claim_status ADD VALUE IF NOT EXISTS 'under_reviewer_check'    AFTER 'returned_by_auditor';
 
--- Commit the enum additions before using them in UPDATE statements.
--- (In Supabase SQL Editor, each statement runs in its own transaction,
--- so the above ALTERs are visible to the UPDATEs below.)
-
--- ─── Step 2: Migrate existing claims data ───────────────────────
-
--- under_consultant_review → under_supervisor_review
-UPDATE claims
-SET status = 'under_supervisor_review'
-WHERE status = 'under_consultant_review';
-
--- returned_by_consultant → returned_by_supervisor
-UPDATE claims
-SET status = 'returned_by_supervisor'
-WHERE status = 'returned_by_consultant';
-
--- under_admin_review → under_auditor_review
--- (admin review maps to auditor review in the 5-stage workflow)
-UPDATE claims
-SET status = 'under_auditor_review'
-WHERE status = 'under_admin_review';
-
--- returned_by_admin → returned_by_auditor
-UPDATE claims
-SET status = 'returned_by_auditor'
-WHERE status = 'returned_by_admin';
-
--- ─── Step 3: Migrate claim_workflow audit trail ──────────────────
-
-UPDATE claim_workflow SET from_status = 'under_supervisor_review' WHERE from_status = 'under_consultant_review';
-UPDATE claim_workflow SET from_status = 'returned_by_supervisor'  WHERE from_status = 'returned_by_consultant';
-UPDATE claim_workflow SET from_status = 'under_auditor_review'    WHERE from_status = 'under_admin_review';
-UPDATE claim_workflow SET from_status = 'returned_by_auditor'     WHERE from_status = 'returned_by_admin';
-
-UPDATE claim_workflow SET to_status = 'under_supervisor_review' WHERE to_status = 'under_consultant_review';
-UPDATE claim_workflow SET to_status = 'returned_by_supervisor'  WHERE to_status = 'returned_by_consultant';
-UPDATE claim_workflow SET to_status = 'under_auditor_review'    WHERE to_status = 'under_admin_review';
-UPDATE claim_workflow SET to_status = 'returned_by_auditor'     WHERE to_status = 'returned_by_admin';
-
--- ─── Step 4: Update change_order_status enum (if applicable) ────
--- change_order_status uses same stage names for its workflow
 ALTER TYPE change_order_status ADD VALUE IF NOT EXISTS 'under_supervisor_review' AFTER 'submitted';
 ALTER TYPE change_order_status ADD VALUE IF NOT EXISTS 'under_auditor_review'    AFTER 'under_supervisor_review';
 ALTER TYPE change_order_status ADD VALUE IF NOT EXISTS 'under_reviewer_check'    AFTER 'under_auditor_review';
-
-UPDATE change_orders SET status = 'under_supervisor_review' WHERE status = 'under_consultant_review';
-UPDATE change_orders SET status = 'under_auditor_review'    WHERE status = 'under_admin_review';
-
--- ─── Step 5: Update SLA monitor function (if exists) ─────────────
--- Ensure supervisor_review_started_at trigger fires on new status name
-DO $$
-BEGIN
-  -- Drop and recreate the supervisor SLA trigger function if it exists
-  IF EXISTS (
-    SELECT 1 FROM pg_proc WHERE proname = 'set_supervisor_review_timestamp'
-  ) THEN
-    -- Function body will reference the new status name — recreate via
-    -- the companion migration 010_production_schema.sql if needed.
-    NULL;
-  END IF;
-END;
-$$;
-
--- ─── Verification ────────────────────────────────────────────────
--- Run after migration to confirm counts:
-SELECT status, COUNT(*) FROM claims GROUP BY status ORDER BY status;
-SELECT status, COUNT(*) FROM change_orders GROUP BY status ORDER BY status;
-
--- Expected: zero rows with old status names (under_consultant_review,
--- returned_by_consultant, under_admin_review, returned_by_admin)
 
 
 -- ════════════════════════════════════════════════════════════════════
 --  STEP 9  —  MIGRATION  —  seq=010b
 --  Source: legacy: migrations/010_user_contracts.sql
---  Reason: user_contracts (m2m) — additive on top of 001
+--  Reason: user_contracts (m2m)
 -- ════════════════════════════════════════════════════════════════════
 -- ============================================================
 -- Migration 010: User-Contract Associations (many-to-many)
