@@ -102,7 +102,7 @@ Before going live:
 
 - [ ] Remove `SQL/migrations/005_rls_prototype_access.sql` (open access — dev only)
 - [ ] Apply production RLS policies (Sprint 5 — item 39)
-- [ ] Change all user passwords from the seed default (`0555180602`)
+- [ ] Change all user passwords from the seed default (`<rotated / do not use — see secret_rotation_runbook.md>`)
 - [ ] Configure Supabase SMTP with official ministry email server
 - [ ] Verify custom domain DNS points to Netlify
 - [ ] Enable Netlify HTTPS (automatic with Let's Encrypt)
@@ -115,12 +115,12 @@ Before going live:
 
 | Name | Email | Role | Temp Password |
 |---|---|---|---|
-| محمد العرفج | Ma.Alarfaj@momah.gov.sa | director | `0555180602` |
-| حسام الحبلين | halhablayn-Contractor@momah.gov.sa | auditor/admin | `0555180602` |
-| أحمد الراشدي | reviewer@momah.gov.sa | reviewer | `0555180602` |
-| محمود رجب | mahmoud.ragab@beeah.sa | supervisor | `0555180602` |
-| عبدالله البهدل | abdullah.albahdal@beeah.sa | contractor | `0555180602` |
-| مالك العقاب | arfaj001@gmail.com | contractor | `0555180602` |
+| محمد العرفج | Ma.Alarfaj@momah.gov.sa | director | `<rotated / do not use — see secret_rotation_runbook.md>` |
+| حسام الحبلين | halhablayn-Contractor@momah.gov.sa | auditor/admin | `<rotated / do not use — see secret_rotation_runbook.md>` |
+| أحمد الراشدي | reviewer@momah.gov.sa | reviewer | `<rotated / do not use — see secret_rotation_runbook.md>` |
+| محمود رجب | mahmoud.ragab@beeah.sa | supervisor | `<rotated / do not use — see secret_rotation_runbook.md>` |
+| عبدالله البهدل | abdullah.albahdal@beeah.sa | contractor | `<rotated / do not use — see secret_rotation_runbook.md>` |
+| مالك العقاب | arfaj001@gmail.com | contractor | `<rotated / do not use — see secret_rotation_runbook.md>` |
 
 > **IMPORTANT:** Change all passwords before production deployment.
 
