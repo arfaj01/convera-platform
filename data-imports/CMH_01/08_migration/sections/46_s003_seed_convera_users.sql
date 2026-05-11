@@ -22,7 +22,7 @@
 --  Each user matches an existing profiles row by email.
 --
 --  ╔═══════════════════════════════════════════════════════════════╗
---  ║  ⚠️  BOOTSTRAP PASSWORD: 0555180602                         ║
+--  ║  ⚠️  BOOTSTRAP PASSWORD: <set via SET LOCAL custom.bootstrap_password — see preamble>  ║
 --  ║  This is a TEMPORARY password for testing/staging ONLY.     ║
 --  ║  ALL users must change their password before production.    ║
 --  ║  Never deploy with this password to a public environment.   ║
@@ -43,6 +43,23 @@
 --  Idempotency: ON CONFLICT (email) DO UPDATE
 -- ═══════════════════════════════════════════════════════════════════
 
+-- ── Required runtime parameter ──────────────────────────────────────
+-- Set the bootstrap password before running this seed. Examples:
+--   psql -v ON_ERROR_STOP=1 \
+--        -c "SET LOCAL custom.bootstrap_password = '<your-pwd>';" \
+--        -f 46_s003_seed_convera_users.sql
+-- Or in Studio's SQL editor, prepend ONE line to your paste:
+--   SET LOCAL custom.bootstrap_password = '<your-pwd>';
+DO $$
+BEGIN
+  IF current_setting('custom.bootstrap_password', true) IS NULL
+     OR length(trim(current_setting('custom.bootstrap_password', true))) < 8
+  THEN
+    RAISE EXCEPTION
+      'BOOTSTRAP_PASSWORD_NOT_SET — run: SET LOCAL custom.bootstrap_password = ''<at-least-8-chars>''; before this seed';
+  END IF;
+END $$;
+
 INSERT INTO convera_users (
   email, password_hash, name, name_ar, role,
   phone, phone_masked, avatar, avatar_color,
@@ -52,7 +69,7 @@ VALUES
   -- Director — full access
   (
     'Ma.Alarfaj@momah.gov.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Mohammed Alarfaj',
     'محمد العرفج',
     'director',
@@ -68,7 +85,7 @@ VALUES
   -- Admin — review, manage, forward
   (
     'halhablayn-Contractor@momah.gov.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Hossam Al-Hablayn',
     'حسام الحبلين',
     'admin',
@@ -84,7 +101,7 @@ VALUES
   -- Consultant — Beeah (external, submit/track)
   (
     'mahmoud.ragab@beeah.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Mahmoud Ragab',
     'محمود رجب',
     'consultant',
@@ -100,7 +117,7 @@ VALUES
   -- Contractor — Beeah (external, contract 231001101771)
   (
     'abdullah.albahdal@beeah.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Abdullah Albahdal',
     'عبدالله البهدل',
     'contractor',
@@ -116,7 +133,7 @@ VALUES
   -- Contractor — Sharat (external, contract 241039011332)
   (
     'arfaj001@gmail.com',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Malik Al-Oqab',
     'مالك العقاب',
     'contractor',
@@ -132,7 +149,7 @@ VALUES
   -- Internal Reviewer
   (
     'reviewer@momah.gov.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Ahmed Al-Rashidi',
     'أحمد الراشدي',
     'consultant',

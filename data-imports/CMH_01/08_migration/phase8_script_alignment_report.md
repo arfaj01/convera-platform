@@ -69,7 +69,7 @@ The realigned `scripts/import-cmh01-controlled.js`:
 7. **Claim creation + transitions** — unchanged URLs; auth swapped to `MIGRATION_USER_JWT`. Claim-15 special-case (empty `boq_items[]`, data-source tag) preserved.
 8. **Attachments** — intent-logged (the `POST /api/documents` route doesn't exist; operator handles via UI).
 9. **Dry-run is now consistent** — every platform API call is logged as `[DRY-WRITE]` and skipped; only PostgREST reads are issued (and only against the staging Supabase project, never the platform API).
-10. **Secret masking** — every emit goes through `mask()` which replaces the live values of `SUPABASE_SERVICE_ROLE_KEY`, `MIGRATION_USER_JWT`, plus pattern-based fallbacks for `sb_secret_*`, `sb_publishable_*`, JWT-shaped strings. Logs and result JSON are safe to share.
+10. **Secret masking** — every emit goes through `mask()` which replaces the live values of `SUPABASE_SERVICE_ROLE_KEY`, `MIGRATION_USER_JWT`, plus pattern-based fallbacks for `<server-side secret key>*`, `<publishable key>*`, JWT-shaped strings. Logs and result JSON are safe to share.
 
 ---
 

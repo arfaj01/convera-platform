@@ -126,7 +126,7 @@ The following files in the legacy folder reference the production project ref `n
 
 | Path | Why forbidden |
 |---|---|
-| `CONVERA/FRONTEND/.env.local` | Real production `sb_publishable_*` + `sb_secret_*` keys (confirmed in earlier session — production project ref `ngwxlockzkjpmzuvgakx`). **Do not read, copy, or reuse.** |
+| `CONVERA/FRONTEND/.env.local` | Real production `<publishable key>*` + `<server-side secret key>*` keys (confirmed in earlier session — production project ref `ngwxlockzkjpmzuvgakx`). **Do not read, copy, or reuse.** |
 | `CONVERA/FRONTEND/.env.local.example` | Same production project ref. |
 | `CONVERA/PROJECTS/<CODE>/_ETL/.env.example` × 15 projects | Per-project env templates pointing at the production ref. Per `CMH_01/00_inventory/F1_RECOVERY_CHECKLIST.md` §5, these are preserved as forensic evidence only. |
 | `CONVERA/PROJECTS/<CODE>/_ETL/migrate.py` × 15 projects | Legacy migration script that writes via service-role to whatever URL is in `.env`. Documented as "will not be used as-is" in F1 §5 because it bypasses the platform's governance pipeline. |

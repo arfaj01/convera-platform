@@ -11806,7 +11806,7 @@ ORDER BY c.start_date;
 --  Each user matches an existing profiles row by email.
 --
 --  ╔═══════════════════════════════════════════════════════════════╗
---  ║  ⚠️  BOOTSTRAP PASSWORD: 0555180602                         ║
+--  ║  ⚠️  BOOTSTRAP PASSWORD: <set via SET LOCAL custom.bootstrap_password — see preamble>  ║
 --  ║  This is a TEMPORARY password for testing/staging ONLY.     ║
 --  ║  ALL users must change their password before production.    ║
 --  ║  Never deploy with this password to a public environment.   ║
@@ -11827,6 +11827,23 @@ ORDER BY c.start_date;
 --  Idempotency: ON CONFLICT (email) DO UPDATE
 -- ═══════════════════════════════════════════════════════════════════
 
+-- ── Required runtime parameter ──────────────────────────────────────
+-- Set the bootstrap password before running this seed. Examples:
+--   psql -v ON_ERROR_STOP=1 \
+--        -c "SET LOCAL custom.bootstrap_password = '<your-pwd>';" \
+--        -f staging_schema_bundle.sql
+-- Or in Studio's SQL editor, prepend ONE line to your paste:
+--   SET LOCAL custom.bootstrap_password = '<your-pwd>';
+DO $$
+BEGIN
+  IF current_setting('custom.bootstrap_password', true) IS NULL
+     OR length(trim(current_setting('custom.bootstrap_password', true))) < 8
+  THEN
+    RAISE EXCEPTION
+      'BOOTSTRAP_PASSWORD_NOT_SET — run: SET LOCAL custom.bootstrap_password = ''<at-least-8-chars>''; before this seed';
+  END IF;
+END $$;
+
 INSERT INTO convera_users (
   email, password_hash, name, name_ar, role,
   phone, phone_masked, avatar, avatar_color,
@@ -11836,7 +11853,7 @@ VALUES
   -- Director — full access
   (
     'Ma.Alarfaj@momah.gov.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Mohammed Alarfaj',
     'محمد العرفج',
     'director',
@@ -11852,7 +11869,7 @@ VALUES
   -- Admin — review, manage, forward
   (
     'halhablayn-Contractor@momah.gov.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Hossam Al-Hablayn',
     'حسام الحبلين',
     'admin',
@@ -11868,7 +11885,7 @@ VALUES
   -- Consultant — Beeah (external, submit/track)
   (
     'mahmoud.ragab@beeah.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Mahmoud Ragab',
     'محمود رجب',
     'consultant',
@@ -11884,7 +11901,7 @@ VALUES
   -- Contractor — Beeah (external, contract 231001101771)
   (
     'abdullah.albahdal@beeah.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Abdullah Albahdal',
     'عبدالله البهدل',
     'contractor',
@@ -11900,7 +11917,7 @@ VALUES
   -- Contractor — Sharat (external, contract 241039011332)
   (
     'arfaj001@gmail.com',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Malik Al-Oqab',
     'مالك العقاب',
     'contractor',
@@ -11916,7 +11933,7 @@ VALUES
   -- Internal Reviewer
   (
     'reviewer@momah.gov.sa',
-    '0555180602',
+    current_setting('custom.bootstrap_password'),
     'Ahmed Al-Rashidi',
     'أحمد الراشدي',
     'consultant',
@@ -11981,7 +11998,7 @@ ORDER BY id;
 --    DO NOTHING clause in the trigger handles duplicates safely.
 --
 --  ╔═══════════════════════════════════════════════════════════════╗
---  ║  ⚠️  BOOTSTRAP PASSWORD: 0555180602                         ║
+--  ║  ⚠️  BOOTSTRAP PASSWORD: <set via SET LOCAL custom.bootstrap_password — see preamble>  ║
 --  ║  This is a TEMPORARY password for testing/staging ONLY.     ║
 --  ║  ALL users must change their password before production.    ║
 --  ║  Never deploy with this password to a public environment.   ║
@@ -12000,6 +12017,18 @@ ORDER BY id;
 -- ═══════════════════════════════════════════════════════════════════
 
 
+-- ── Required runtime parameter (re-declared for this section) ──────
+-- Idempotent — if already set above by section 46, this guard is a no-op.
+DO $$
+BEGIN
+  IF current_setting('custom.bootstrap_password', true) IS NULL
+     OR length(trim(current_setting('custom.bootstrap_password', true))) < 8
+  THEN
+    RAISE EXCEPTION
+      'BOOTSTRAP_PASSWORD_NOT_SET — run: SET LOCAL custom.bootstrap_password = ''<at-least-8-chars>''; before this seed';
+  END IF;
+END $$;
+
 -- ─── Helper: create auth user with known UUID ────────────────────
 -- Supabase stores passwords as bcrypt hashes in auth.users.
 -- The encrypted_password column uses the format: $2a$10$...
@@ -12008,8 +12037,8 @@ DO $$
 DECLARE
   v_password_hash TEXT;
 BEGIN
-  -- Generate bcrypt hash of the bootstrap password
-  v_password_hash := crypt('0555180602', gen_salt('bf', 10));
+  -- Generate bcrypt hash of the bootstrap password (read from runtime parameter)
+  v_password_hash := crypt(current_setting('custom.bootstrap_password'), gen_salt('bf', 10));
 
   -- ── A. Director ──────────────────────────────────────────────
   INSERT INTO auth.users (

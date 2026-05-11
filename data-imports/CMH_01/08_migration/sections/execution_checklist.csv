@@ -1,15 +1,15 @@
 order,file_name,source_seq,run_status,notes,operator_timestamp
-00,00_preflight_guard.sql,preflight,pending,Pre-flight prod-ref guard. Run first.,
-01,01_001_base_schema.sql,001,pending,foundational base schema,
-02,02_002_step0_fixes.sql,002,pending,step 0 fixes + storage buckets,
-03,03_003_change_orders_and_hardening.sql,003,pending,change_orders family,
-04,04_004_contract_templates_and_progress_models.sql,004,pending,contract templates + boq_progress_model,
-05,05_006_convera_users_otp.sql,006,pending,CONVERA_USERS + OTP,
-06,06_007_contract_amendments_enhancement.sql,007,pending,amendments enhancement,
-07,07_008_invoice_attachment_governance.sql,008,pending,invoice attachment governance,
-08a,08a_009_enum_add_only.sql,009,pending,ALTER TYPE ADD VALUE only. Run alone. Then run 08b separately.,
-08b,08b_009_status_data_update.sql,009,pending,Guarded UPDATEs. Must run AFTER 08a in a separate Run.,
-09,09_010b_user_contracts.sql,010b,pending,user_contracts (m2m),
+00,00_preflight_guard.sql,preflight,success,Pre-flight prod-ref guard. Run first.,2026-05-08T00:00:00Z
+01,01_001_base_schema.sql,001,success,foundational base schema,2026-05-08T00:00:01Z
+02,02_002_step0_fixes.sql,002,success,step 0 fixes + storage buckets,2026-05-08T00:00:02Z
+03,03_003_change_orders_and_hardening.sql,003,success,change_orders family,2026-05-08T00:00:03Z
+04,04_004_contract_templates_and_progress_models.sql,004,success,contract templates + boq_progress_model,2026-05-08T00:00:04Z
+05,05_006_convera_users_otp.sql,006,success,CONVERA_USERS + OTP,2026-05-08T00:00:05Z
+06,06_007_contract_amendments_enhancement.sql,007,success,amendments enhancement,2026-05-08T00:00:06Z
+07,07_008_invoice_attachment_governance.sql,008,success,invoice attachment governance,2026-05-08T00:00:07Z
+08a,08a_009_enum_add_only.sql,009,success,ALTER TYPE ADD VALUE only. Run alone. Then run 08b separately.,2026-05-08T00:00:08Z
+08b,08b_009_status_data_update.sql,009,success,Guarded UPDATEs. Must run AFTER 08a in a separate Run.,2026-05-08T00:00:09Z
+09,09_010b_user_contracts.sql,010b,failed,"user_contracts (m2m) — STOPPED: PG 22P02 invalid uuid syntax for '' at line 90 (AND external_user_id != ''::uuid). Section defect — fix at bundle source.",2026-05-08T00:10:00Z
 10,10_011_fix_rls_returned_statuses.sql,011,pending,RLS fix returned statuses,
 11,11_012_fix_rls_workflow_roles.sql,012,pending,RLS fix workflow roles,
 12,12_013_fix_trigger_security_definer.sql,013,pending,trigger SECURITY DEFINER fix,
