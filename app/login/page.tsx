@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { signIn } from '@/lib/auth';
 import { friendlyError } from '@/lib/errors';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import { createBrowserSupabase, isSupabaseConfigured } from '@/lib/supabase';
 
 // ─── Translations ─────────────────────────────────────────────────
 
@@ -58,15 +58,60 @@ export default function LoginPage() {
   const t = T[lang];
   const toggleLang = () => setLang(l => l === 'ar' ? 'en' : 'ar');
 
+  // ── If an existing session is already valid, bounce to dashboard ───
+  // Soft check — does NOT block the form from rendering. If the call
+  // fails or there is no session, the operator just sees the form.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createBrowserSupabase();
+        const { data } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (data.session?.user) {
+          window.location.replace('/dashboard');
+        }
+      } catch {
+        // Silently ignore — the form remains usable.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Guard against duplicate submissions while a request is in flight.
+    // The submit button is also `disabled={loading}`, but key-bound
+    // submissions (Enter in input) can still fire — block them here.
+    if (loading) return;
+
+    // ── Client-side validation (Arabic) ──────────────────────────────
+    // Prevents empty-field submissions from reaching Supabase Auth,
+    // which would otherwise return `validation_failed` / "missing email
+    // or phone" — a string the user does not need to see.
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail && !password) {
+      setError('يرجى التأكد من إدخال البريد الإلكتروني وكلمة المرور.');
+      return;
+    }
+    if (!trimmedEmail) {
+      setError('يرجى إدخال البريد الإلكتروني.');
+      return;
+    }
+    if (!password) {
+      setError('يرجى إدخال كلمة المرور.');
+      return;
+    }
+
     setError('');
     setLoading(true);
     try {
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error(t.timeout)), 15000),
       );
-      await Promise.race([signIn(email, password), timeout]);
+      await Promise.race([signIn(trimmedEmail, password), timeout]);
       window.location.href = '/dashboard';
     } catch (err) {
       setError(friendlyError(err));
@@ -183,7 +228,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} noValidate>
+        <form onSubmit={handleSubmit}>
           {/* Email */}
           <div className="mb-4">
             <label className="block text-xs font-bold text-gray-600 mb-1.5">

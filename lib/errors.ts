@@ -3,6 +3,28 @@
 // Always logs the technical error to console for debugging.
 
 const ERROR_MAP: Array<{ pattern: RegExp; message: string }> = [
+  // ─── Empty-field validation (added 2026-05-11) ──────────────────
+  // These must come BEFORE the generic "invalid login credentials" pattern
+  // so that explicit empty-field submissions yield a precise hint, not the
+  // generic "credentials wrong" message. The patterns also cover Supabase
+  // GoTrue's `validation_failed` error_code which arrives as plain text
+  // (e.g. "missing email or phone").
+  {
+    pattern: /CONVERA_EMPTY_BOTH|empty email and password/i,
+    message: 'يرجى التأكد من إدخال البريد الإلكتروني وكلمة المرور.',
+  },
+  {
+    pattern: /CONVERA_EMPTY_EMAIL|missing email or phone|missing[_\s]+email|empty email|email is required|email[_\s]+required/i,
+    message: 'يرجى إدخال البريد الإلكتروني.',
+  },
+  {
+    pattern: /CONVERA_EMPTY_PASSWORD|missing[_\s]+password|empty password|password is required|password[_\s]+required/i,
+    message: 'يرجى إدخال كلمة المرور.',
+  },
+  {
+    pattern: /validation_failed/i,
+    message: 'يرجى التأكد من إدخال البريد الإلكتروني وكلمة المرور.',
+  },
   // ─── Auth errors (Supabase GoTrue) ─────────────────────────────
   // Account suspension — checked after successful GoTrue login
   {
