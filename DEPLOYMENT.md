@@ -65,8 +65,8 @@ Go to **Netlify → Site settings → Environment variables** and add:
 
 | Variable | Value |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://<project>.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `sb_publishable_...` |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://<project-ref>.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `<publishable-or-anon-key-placeholder>` |
 
 > **Do NOT add `SUPABASE_SERVICE_ROLE_KEY` to Netlify** — it would be exposed to the browser.
 
