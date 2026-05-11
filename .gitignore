@@ -12,6 +12,14 @@
 .env*.local
 .env
 
+# Temporary credential CSVs from scripts/rotate-user-passwords.js
+# (defaults to ~/Desktop/, but defensive in case anyone redirects here)
+convera-temp-passwords-*.csv
+*temp-password*.csv
+*temp-passwords*.csv
+*temp_password*.csv
+*temp_passwords*.csv
+
 # misc
 .DS_Store
 *.tsbuildinfo

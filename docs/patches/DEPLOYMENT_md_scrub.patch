@@ -1,0 +1,68 @@
+From: Claude (Cowork mode)
+Date: 2026-05-10
+Subject: [PATCH] docs: scrub bootstrap password from DEPLOYMENT.md
+
+⚠ DO NOT APPLY THIS PATCH UNTIL the operator has completed
+secret_rotation_runbook.md §3 (rotated every real user password
+in production). Applying earlier only obfuscates without protecting:
+the password is already in git history on origin/main, and a casual
+diff observer can recover it.
+
+After §3 is done, apply with:
+
+    cd C:\Users\Administrator\Desktop\convera-platform
+    git apply docs/patches/DEPLOYMENT_md_scrub.patch
+    git diff DEPLOYMENT.md       # review
+    git add DEPLOYMENT.md
+    git commit -m "docs: scrub rotated bootstrap password from DEPLOYMENT.md"
+
+Patch removes 7 occurrences of the literal `<old bootstrap password redacted>` and replaces
+them with `<rotated — see docs/secret_rotation_runbook.md §3>`. It
+also adds a "WARNING — historical leak" note at the top of the User
+Accounts section so readers understand that git history retains the
+old value.
+
+---
+ DEPLOYMENT.md | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/DEPLOYMENT.md b/DEPLOYMENT.md
+--- a/DEPLOYMENT.md
++++ b/DEPLOYMENT.md
+@@ -102,7 +102,7 @@
+
+ - [ ] Remove `SQL/migrations/005_rls_prototype_access.sql` (open access — dev only)
+ - [ ] Apply production RLS policies (Sprint 5 — item 39)
+-- [ ] Change all user passwords from the seed default (`<old bootstrap password redacted>`)
++- [ ] Change all user passwords from the seed default (rotated 2026-05-10 — see `docs/secret_rotation_runbook.md` §3)
+ - [ ] Configure Supabase SMTP with official ministry email server
+ - [ ] Verify custom domain DNS points to Netlify
+ - [ ] Enable Netlify HTTPS (automatic with Let's Encrypt)
+@@ -112,15 +112,20 @@
+
+ ## User Accounts (Seeded)
+
++> **⚠ WARNING — historical leak:** earlier revisions of this file
++> committed the literal seed-default password alongside these emails.
++> The git history on `origin/main` therefore retains that value
++> indefinitely. The passwords were rotated on 2026-05-10; the value
++> in git history no longer authenticates against production. Do not
++> use it. See `docs/secret_rotation_runbook.md`.
++
+ | Name | Email | Role | Temp Password |
+ |---|---|---|---|
+-| محمد العرفج | Ma.Alarfaj@momah.gov.sa | director | `<old bootstrap password redacted>` |
+-| حسام الحبلين | halhablayn-Contractor@momah.gov.sa | auditor/admin | `<old bootstrap password redacted>` |
+-| أحمد الراشدي | reviewer@momah.gov.sa | reviewer | `<old bootstrap password redacted>` |
+-| محمود رجب | mahmoud.ragab@beeah.sa | supervisor | `<old bootstrap password redacted>` |
+-| عبدالله البهدل | abdullah.albahdal@beeah.sa | contractor | `<old bootstrap password redacted>` |
+-| مالك العقاب | arfaj001@gmail.com | contractor | `<old bootstrap password redacted>` |
++| محمد العرفج | Ma.Alarfaj@momah.gov.sa | director | `<rotated — see runbook §3>` |
++| حسام الحبلين | halhablayn-Contractor@momah.gov.sa | auditor/admin | `<rotated — see runbook §3>` |
++| أحمد الراشدي | reviewer@momah.gov.sa | reviewer | `<rotated — see runbook §3>` |
++| محمود رجب | mahmoud.ragab@beeah.sa | supervisor | `<rotated — see runbook §3>` |
++| عبدالله البهدل | abdullah.albahdal@beeah.sa | contractor | `<rotated — see runbook §3>` |
++| مالك العقاب | arfaj001@gmail.com | contractor | `<rotated — see runbook §3>` |
+
+ > **IMPORTANT:** Change all passwords before production deployment.
+
