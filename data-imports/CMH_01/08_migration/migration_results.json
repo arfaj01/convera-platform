@@ -1,0 +1,24 @@
+{
+  "run_started_at": "2026-05-07T07:07:32.737Z",
+  "steps": [
+    {
+      "time": "2026-05-07T07:07:32.905Z",
+      "step": "start",
+      "status": "ok",
+      "detail": "mode=dry-run, supabase=https://jrqkzwacerdudmeacvar.supabase.co, platform=https://convera-platform.vercel.app, auth=(none)"
+    },
+    {
+      "time": "2026-05-07T07:07:33.938Z",
+      "step": "contract.error",
+      "status": "fail",
+      "detail": "PostgREST 404 contracts — {\"code\":\"PGRST205\",\"details\":null,\"hint\":null,\"message\":\"Could not find the table 'public.contracts' in the schema cache\"}"
+    }
+  ],
+  "failures": [
+    {
+      "step": "contract",
+      "error": "PostgREST 404 contracts — {\"code\":\"PGRST205\",\"details\":null,\"hint\":null,\"message\":\"Could not find the table 'public.contracts' in the schema cache\"}"
+    }
+  ],
+  "run_finished_at": "2026-05-07T07:07:33.942Z"
+}
